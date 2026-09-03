@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    html { -webkit-font-smoothing: antialiased; }
+    body { @apply bg-paper text-ink text-[14px]; }
+
+    /* Digits that line up in columns — every amount table needs this */
+    .tnum { font-variant-numeric: tabular-nums; }
+
+    /* Keyboard users must always be able to see where focus is */
+    :focus-visible { @apply outline-none ring-2 ring-brand ring-offset-1; }
+}
+
+
+/* ---------------------------------------------------------------------------
+   Table -> cards, below sm.
+   See the Table component in ui.jsx for why: a horizontally scrolling table
+   pushed the actionable column off a phone screen entirely.
+   Each row becomes a card, each cell a "LABEL   value" line. The label comes
+   from data-label, which the Table component injects from its `head`.
+--------------------------------------------------------------------------- */
+@media (max-width: 639px) {
+    /* Inline min-width from the component has to lose here, hence !important */
+    .rtable { min-width: 0 !important; }
+    .rtable thead { display: none; }
+    .rtable, .rtable tbody, .rtable tr, .rtable td { display: block; width: 100%; }
+
+    .rtable tr { @apply flex flex-col border border-line rounded-lg bg-white mb-2 overflow-hidden; }
+    .rtable tr:last-child { @apply mb-0; }
+    .rtable tr:hover { @apply bg-white; }
+
+    .rtable td {
+        @apply flex items-center justify-between gap-3 px-3 py-2 text-right border-0 border-b border-line;
+    }
+    .rtable td:last-child { @apply border-b-0; }
+
+    .rtable td::before {
+        content: attr(data-label);
+        @apply text-ink-3 text-left shrink-0 font-mono;
+        font-size: 10px;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+    }
+    /* The primary cell becomes the card's title bar and moves to the top.
+       "NAME   Aarav Sharma" reads worse than a heading, and the name is what
+       identifies the card — not whichever column happens to come first. */
+    .rtable td[data-primary] {
+        @apply order-first justify-start text-left font-semibold text-[13.5px] bg-paper-2;
+    }
+    .rtable td[data-primary]::before { content: none; }
+
+    /* Action columns have a blank header — no label, just the control */
+    .rtable td[data-label='']::before { content: none; }
+    .rtable td[data-label='']{ @apply justify-end; }
+
+    /* A cell holding only a control (input, segmented buttons) gets room */
+    .rtable td > .seg, .rtable td > input { @apply ml-auto; }
+}
+
+/* Tap highlight on iOS looks like a bug on a data table */
+@media (max-width: 639px) {
+    button, a { -webkit-tap-highlight-color: transparent; }
+}
+
+@media print {
+    /* Receipts and salary slips print from the browser — no server-side PDF
+       generation, and none of that dependency's cold-start cost */
+    @page { size: A4; margin: 14mm; }
+
+    html, body {
+        background: #fff !important;
+        height: auto !important;
+    }
+
+    .no-print { display: none !important; }
+
+    /* Print the sheet and nothing else.
+       Everything is hidden by VISIBILITY rather than display, because the
+       sheet lives deep inside a modal — display:none on its ancestors would
+       take the sheet down with them. Hidden elements still occupy space, so
+       the sheet is lifted to the top-left of the page on top of them.
+
+       Scoped with :has() so this only applies when there IS a sheet on the
+       page. A screen without one — the day book, a report — must still print
+       the way it looks, not come out blank. */
+    body:has(.print-only) * { visibility: hidden !important; }
+    body:has(.print-only) .print-only,
+    body:has(.print-only) .print-only * { visibility: visible !important; }
+
+    .print-only {
+        display: block !important;
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+
+    /* The modal is a fixed, scrolling box. Left alone it clips the sheet to
+       one screenful and prints a single cropped page with the dialog's own
+       shadow and grey backdrop around it. */
+    .modal-backdrop,
+    .modal-panel {
+        position: static !important;
+        overflow: visible !important;
+        max-height: none !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: auto !important;
+        max-width: none !important;
+    }
+
+    /* Table borders and tinted rows must survive the printer's colour drop */
+    .print-only * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+.print-only { display: none; }
