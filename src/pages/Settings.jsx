@@ -154,7 +154,7 @@ function Users() {
                             {list.map((u) => (
                                 <Tr key={u._id}>
                                     <Td className="font-semibold whitespace-nowrap">
-                                        {u.name}{u._id === me?.id && <span className="text-ink-3 font-normal"> (aap)</span>}
+                                        {u.name}{u._id === me?.id && <span className="text-ink-3 font-normal"> (you)</span>}
                                     </Td>
                                     <Td className="font-mono text-[11.5px] text-ink-3">{u.username}</Td>
                                     <Td><Pill tone={u.role === 'Admin' ? 'ok' : 'neutral'}>{u.role}</Pill></Td>

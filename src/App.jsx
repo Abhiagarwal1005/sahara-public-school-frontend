@@ -12,6 +12,7 @@ const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Students = lazy(() => import('./pages/Students'));
 const StudentProfile = lazy(() => import('./pages/StudentProfile'));
+const Leads = lazy(() => import('./pages/Leads'));
 const Fees = lazy(() => import('./pages/Fees'));
 const Stock = lazy(() => import('./pages/Stock'));
 const Purchases = lazy(() => import('./pages/Purchases'));
@@ -40,6 +41,7 @@ export default function App() {
                         <Route index element={gate('report.dashboard', <Dashboard />)} />
                         <Route path="students" element={gate('student.view', <Students />)} />
                         <Route path="students/:id" element={gate('student.view', <StudentProfile />)} />
+                        <Route path="leads" element={gate('lead.view', <Leads />)} />
                         <Route path="fees" element={gate('fee.view', <Fees />)} />
                         <Route path="stock" element={gate('stock.view', <Stock />)} />
                         <Route path="purchases" element={gate('purchase.view', <Purchases />)} />

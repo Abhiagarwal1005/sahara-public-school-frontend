@@ -108,6 +108,45 @@ export const useVoidReceipt = () =>
         success: 'Receipt voided',
     });
 
+// ---- leads (enquiries) ----
+// A lead is connected to nothing else in the app, so nothing here invalidates
+// any other cache — and no other mutation touches ['leads'].
+export const useLeads = (params) =>
+    useQuery({ queryKey: ['leads', params], queryFn: () => get('/leads', params) });
+
+export const useLeadSummary = () =>
+    useQuery({ queryKey: ['leads', 'summary'], queryFn: () => get('/leads/summary') });
+
+export const useLead = (id) =>
+    useQuery({ queryKey: ['leads', 'one', id], queryFn: () => get(`/leads/${id}`), enabled: Boolean(id) });
+
+export const useCreateLead = (onDone) =>
+    useAction((body) => post('/leads', body), {
+        invalidate: [['leads']],
+        success: 'Enquiry saved',
+        onDone,
+    });
+
+export const useUpdateLead = () =>
+    useAction(({ id, ...body }) => patch(`/leads/${id}`, body), {
+        invalidate: [['leads']],
+        success: 'Lead updated',
+    });
+
+export const useLogFollowUp = (onDone) =>
+    useAction(({ id, ...body }) => post(`/leads/${id}/follow-up`, body), {
+        invalidate: [['leads']],
+        success: 'Follow-up saved',
+        onDone,
+    });
+
+export const useDeleteLead = (onDone) =>
+    useAction((id) => del(`/leads/${id}`), {
+        invalidate: [['leads']],
+        success: 'Lead deleted',
+        onDone,
+    });
+
 // ---- stock ----
 export const useStockItems = (params) =>
     useQuery({ queryKey: ['stock', 'items', params], queryFn: () => get('/stock/items', params) });
@@ -226,6 +265,12 @@ export const useMarkClasses = () =>
 export const useSlips = (params) =>
     useQuery({ queryKey: ['salary', params], queryFn: () => get('/salary/slips', params), enabled: Boolean(params?.month) });
 
+// The open slip reads itself, rather than trusting the row the table handed
+// over — otherwise adding a bonus updates the totals behind the dialog while
+// the dialog itself keeps showing the old net.
+export const useSlip = (id) =>
+    useQuery({ queryKey: ['salary', 'slip', id], queryFn: () => get(`/salary/slips/${id}`), enabled: Boolean(id) });
+
 export const useGenerateSalary = () =>
     useAction((body) => post('/salary/generate', body), {
         invalidate: [['salary']],
@@ -234,6 +279,18 @@ export const useGenerateSalary = () =>
 
 export const useUpdateSlip = () =>
     useAction(({ id, ...body }) => patch(`/salary/slips/${id}`, body), { invalidate: [['salary']], success: 'Slip updated' });
+
+export const useAddAdjustment = () =>
+    useAction(({ id, ...body }) => post(`/salary/slips/${id}/adjustment`, body), {
+        invalidate: [['salary']],
+        success: (_d, v) => `${v.kind === 'Add' ? 'Added' : 'Deducted'} ₹${v.amount} — ${v.label}`,
+    });
+
+export const useRemoveAdjustment = () =>
+    useAction(({ id, adjustmentId }) => del(`/salary/slips/${id}/adjustment/${adjustmentId}`), {
+        invalidate: [['salary']],
+        success: 'Line removed',
+    });
 
 export const useDiscardSlip = () =>
     useAction((id) => del(`/salary/slips/${id}`), {

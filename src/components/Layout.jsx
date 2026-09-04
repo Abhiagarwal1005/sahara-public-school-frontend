@@ -23,6 +23,8 @@ const NAV = [
       icon: <><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" /><rect x="9" y="1.5" width="5.5" height="5.5" rx="1" /><rect x="1.5" y="9" width="5.5" height="5.5" rx="1" /><rect x="9" y="9" width="5.5" height="5.5" rx="1" /></> },
     { to: '/students', label: 'Students', perm: 'student.view',
       icon: <><circle cx="6" cy="5" r="2.6" /><path d="M1.6 14c0-2.6 2-4.2 4.4-4.2S10.4 11.4 10.4 14" /><path d="M11 3.2a2.5 2.5 0 010 4.6M12.2 13.4c0-2 .9-3 2.2-3.4" /></> },
+    { to: '/leads', label: 'Enquiries', perm: 'lead.view',
+      icon: <><path d="M2.2 3.4h11.6v9.2H5.4L2.2 14.6z" /><path d="M5 6.6h6M5 9.2h4" /></> },
     { to: '/fees', label: 'Fees', perm: 'fee.view',
       icon: <path d="M4 2.8h8M4 5.6h8M9.6 2.8c1.7 0 2.6 1 2.6 2.4S11.3 8 9.6 8H4l6 5.2" /> },
     { to: '/stock', label: 'Stock & Sales', perm: 'stock.view',

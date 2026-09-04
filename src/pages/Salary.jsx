@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import {
-    useSlips, useGenerateSalary, useApproveSlip, usePaySlip, useUpdateSlip, useDiscardSlip,
+    useSlips, useSlip, useGenerateSalary, useApproveSlip, usePaySlip, useUpdateSlip, useDiscardSlip,
+    useAddAdjustment, useRemoveAdjustment,
     useActiveSession,
 } from '../hooks/queries';
 import { money, moneyExact, num, monthLabel, currentMonthKey, monthOptions, date, amountInWords } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
-    Async, PageTitle, Tabs, statusPill, EmptyState,
+    Async, PageTitle, Tabs, statusPill, EmptyState, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
 import { TeachersList } from './Teachers';
@@ -16,13 +17,20 @@ import { TeachersList } from './Teachers';
 // it personally and "why is this number what it is" should be answered on
 // the screen, not over the phone.
 // ---------------------------------------------------------------------------
-function SlipDetail({ slip, onClose }) {
+function SlipDetail({ slip: row, onClose }) {
+    // The row opens the dialog instantly; the fetch keeps it honest afterwards.
+    const live = useSlip(row._id);
+    const slip = live.data || row;
+
     const approve = useApproveSlip();
     const pay = usePaySlip();
     const update = useUpdateSlip();
     const discard = useDiscardSlip();
-    const [advance, setAdvance] = useState(String(slip.advance || ''));
+    const addAdj = useAddAdjustment();
+    const removeAdj = useRemoveAdjustment();
+    const [advance, setAdvance] = useState(String(row.advance || ''));
     const [mode, setMode] = useState('Bank');
+    const [adj, setAdj] = useState({ kind: 'Add', label: '', amount: '' });
 
     const remaining = slip.netPayable - slip.paidAmount;
     const isDraft = slip.status === 'Draft';
@@ -122,6 +130,31 @@ function SlipDetail({ slip, onClose }) {
                             {unmarked > 1 ? ' those days' : ' that day'} and regenerate if that is wrong.
                         </div>
                     )}
+                    {(slip.adjustments || []).map((a) => (
+                        <div key={a._id} className="flex justify-between items-start gap-2 px-3 py-2 text-[13px]">
+                            <span className="text-ink-2 min-w-0">
+                                {a.label}
+                                {a.byName && <span className="block text-[11px] text-ink-3">{a.byName}</span>}
+                            </span>
+                            <span className="flex items-center gap-1.5 shrink-0">
+                                <span className={cx('tnum font-medium', a.kind === 'Add' ? 'text-good' : 'text-crit')}>
+                                    {a.kind === 'Add' ? '+' : '−'}{money(a.amount)}
+                                </span>
+                                {isDraft && (
+                                    <Can perm="salary.generate">
+                                        <button
+                                            aria-label={`Remove ${a.label}`}
+                                            className="text-ink-3 hover:text-crit leading-none px-1 text-[15px]"
+                                            onClick={() => removeAdj.mutate({ id: slip._id, adjustmentId: a._id })}
+                                        >
+                                            ×
+                                        </button>
+                                    </Can>
+                                )}
+                            </span>
+                        </div>
+                    ))}
+                    {/* Pre-adjustments slips only — nothing writes here now */}
                     {slip.deductions?.map((d, i) => (
                         <div key={i} className="flex justify-between px-3 py-2 text-[13px]">
                             <span className="text-ink-2">{d.label}</span><span className="tnum text-crit">−{money(d.amount)}</span>
@@ -150,6 +183,57 @@ function SlipDetail({ slip, onClose }) {
                                     onClick={() => update.mutate({ id: slip._id, advance: Number(advance) || 0 })}>
                                 Save advance
                             </Button>
+
+                            {/* Bonus, arrear, fine — anything that moves the net for
+                                a reason the attendance sheet cannot express. */}
+                            <div className="border-t border-line pt-3 flex flex-col gap-2.5">
+                                <div className="flex border border-line-2 rounded-md overflow-hidden w-max">
+                                    {[['Add', '+ Add'], ['Deduct', '− Deduct']].map(([k, label]) => (
+                                        <button key={k} type="button"
+                                                onClick={() => setAdj((a) => ({ ...a, kind: k }))}
+                                                className={cx(
+                                                    'px-3 py-1.5 text-[12.5px] font-semibold border-r border-line-2 last:border-r-0',
+                                                    adj.kind === k
+                                                        ? (k === 'Add' ? 'bg-good text-white' : 'bg-crit text-white')
+                                                        : 'bg-paper-2 text-ink-2 hover:bg-white'
+                                                )}>
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <Field label="Reason" required hint="Shown on the slip and on the printout">
+                                    <Input value={adj.label} maxLength={60}
+                                           placeholder={adj.kind === 'Add' ? 'Diwali bonus' : 'Breakage recovery'}
+                                           onChange={(e) => setAdj((a) => ({ ...a, label: e.target.value }))} />
+                                </Field>
+
+                                <Field label="Amount" required>
+                                    <Input inputMode="numeric" value={adj.amount} placeholder="0"
+                                           onChange={(e) => setAdj((a) => ({ ...a, amount: e.target.value }))} />
+                                </Field>
+
+                                {adj.kind === 'Deduct' && Number(adj.amount) > slip.netPayable && (
+                                    <p className="text-[12px] text-crit">
+                                        Only {money(slip.netPayable)} is payable — a bigger deduction would
+                                        take the net below zero.
+                                    </p>
+                                )}
+
+                                <Button size="sm" className="w-max" loading={addAdj.isPending}
+                                        disabled={adj.label.trim().length < 2 || !(Number(adj.amount) > 0)}
+                                        onClick={async () => {
+                                            await addAdj.mutateAsync({
+                                                id: slip._id,
+                                                kind: adj.kind,
+                                                label: adj.label.trim(),
+                                                amount: Number(adj.amount),
+                                            });
+                                            setAdj({ kind: adj.kind, label: '', amount: '' });
+                                        }}>
+                                    {adj.kind === 'Add' ? 'Add to salary' : 'Deduct from salary'}
+                                </Button>
+                            </div>
 
                             <div className="bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px] mt-1">
                                 Approving <b>freezes</b> this slip. Later changes to attendance or
@@ -276,6 +360,14 @@ function SlipDetail({ slip, onClose }) {
                                 </td>
                                 <td style={{ padding: '3px 8px', textAlign: 'right', fontWeight: 600 }}>{moneyExact(slip.earned)}</td>
                             </tr>
+                            {(slip.adjustments || []).map((a) => (
+                                <tr key={a._id}>
+                                    <td style={{ padding: '3px 8px', color: '#333' }}>{a.label}</td>
+                                    <td style={{ padding: '3px 8px', textAlign: 'right', fontWeight: 600 }}>
+                                        {a.kind === 'Add' ? '+' : '\u2212'}{money(a.amount)}
+                                    </td>
+                                </tr>
+                            ))}
                             {(slip.deductions || []).map((d, i) => (
                                 <tr key={i}>
                                     <td style={{ padding: '3px 8px', color: '#333' }}>{d.label}</td>
@@ -379,7 +471,7 @@ function Slips({ month }) {
                                         <Td align="right">{num(s.grossSalary)}</Td>
                                         <Td align="right" className="font-semibold">{num(s.netPayable)}</Td>
                                         <Td>{statusPill(s.status)}</Td>
-                                        <Td><Button size="sm" onClick={() => setOpen(s)}>Kholo</Button></Td>
+                                        <Td><Button size="sm" onClick={() => setOpen(s)}>Open</Button></Td>
                                     </Tr>
                                 ))}
                             </Table>
