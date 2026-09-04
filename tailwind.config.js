@@ -12,8 +12,8 @@ export default {
                 line: { DEFAULT: '#E2E7DF', 2: '#CFD7CB' },
                 brand: { DEFAULT: '#1E5C44', 2: '#2F7D5D', soft: '#E5EFE9' },
                 sidebar: { DEFAULT: '#12201A', ink: '#B7C6BD', ink2: '#7C8D84', sel: '#1C3329' },
-                // Status colors - CVD validator se paas hue steps (green/amber
-                // apart was the hardest pair). These always ship with a text label
+                // Status colours — steps that passed a colour-blindness checker
+                // (telling green and amber apart was the hardest pair). These
                 // always ship with a text label; never colour alone.
                 good: { DEFAULT: '#0F7A4D', bg: '#E3F1E9' },
                 warn: { DEFAULT: '#B98200', bg: '#FBF0DA' },

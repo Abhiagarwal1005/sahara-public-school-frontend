@@ -20,7 +20,7 @@ export default defineConfig({
     build: {
         // Route-level code splitting comes from the Router itself; this keeps the
         // large vendor chunks separate so changing app code does not invalidate
-        // cached React/Query bundle invalid na ho.
+        // invalidate the cached React/Query bundle.
         rollupOptions: {
             output: {
                 manualChunks: {

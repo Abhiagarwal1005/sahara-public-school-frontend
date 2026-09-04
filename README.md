@@ -104,10 +104,25 @@ changing app code does not invalidate the user's cached vendor bundle.
 
 ## Deploying
 
-Keep the frontend and the API in one Vercel project. Then `VITE_API_URL` stays
-empty, the cookie stays first-party, and CORS preflight never happens.
+`vercel.json` rewrites every path to `index.html`. Without it a refresh on
+`/salary` or `/leads` returns a 404 — the router only exists in the browser.
 
-If they must live on different domains: set `VITE_API_URL` **and** set
-`COOKIE_SAMESITE=none` in the backend's `.env` — otherwise the browser will not
-send the refresh cookie on a cross-site request, and users will be logged out
-every 15 minutes.
+The frontend and the API should answer on **one origin**. Then `VITE_API_URL`
+stays empty, the refresh cookie is first-party, and CORS preflight never
+happens.
+
+If the API is a separate Vercel project, the tidiest way to keep one origin is
+to proxy it from here — add this **above** the catch-all rewrite:
+
+```json
+{ "source": "/api/:path*", "destination": "https://YOUR-API.vercel.app/api/:path*" }
+```
+
+Order matters: the `/(.*)` rule would otherwise swallow `/api` and serve
+`index.html` to every request.
+
+Only if the browser must call the API on a different domain directly: set
+`VITE_API_URL` **and** set `COOKIE_SAMESITE=none` in the backend's environment.
+Be aware that this makes the refresh cookie third-party — Safari blocks those
+outright, so those users are logged out every 15 minutes when the access token
+expires. The proxy above avoids the problem entirely.
