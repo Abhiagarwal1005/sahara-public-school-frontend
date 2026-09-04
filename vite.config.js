@@ -14,7 +14,7 @@ export default defineConfig({
         // the cookie stays first-party and there is no CORS preflight before
         // every request.
         proxy: {
-            '/api': { target: 'http://localhost:8000', changeOrigin: true },
+            '/api': { target: 'https://sahara-public-school-backend.vercel.app', changeOrigin: true },
         },
     },
     build: {
