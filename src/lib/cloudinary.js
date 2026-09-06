@@ -1,4 +1,6 @@
 import api from './api';
+// The cloud name lives in ONE file, with the API's URL — see deploy.config.js.
+import { CLOUDINARY_CLOUD } from '../../deploy.config.js';
 
 // ---------------------------------------------------------------------------
 // Straight from the browser to Cloudinary. The server only issues a
@@ -79,11 +81,32 @@ export const deleteImage = (publicId) => api.post('/uploads/destroy', { publicId
 // Delivery URL. f_auto,q_auto sends the best format for the browser
 // (webp/avif for Chrome) and picks the quality itself — the single biggest
 // bandwidth saving available, in one line.
+//
+// The cloud name comes from deploy.config.js. It used to fall back to
+// `publicId.split('/')[0]`, which looks like the account but is actually the
+// UPLOAD FOLDER — a publicId is "sps/bills/abc123", so that fallback built
+// https://res.cloudinary.com/sps/... for a cloud named something else, and
+// every image 404'd. There is no sensible fallback for this value, so a
+// missing one now renders nothing instead of a broken image.
+let warned = false;
+
 export const imageUrl = (publicId, { width, height } = {}) => {
     if (!publicId) return '';
-    const cloud = import.meta.env.VITE_CLOUDINARY_CLOUD || publicId.split('/')[0];
+
+    if (!CLOUDINARY_CLOUD) {
+        if (!warned && import.meta.env.DEV) {
+            warned = true;
+            console.warn(
+                '[cloudinary] CLOUDINARY_CLOUD is empty in deploy.config.js — ' +
+                    'uploaded images cannot be displayed. Set it to the same value as ' +
+                    "the backend's CLOUDINARY_CLOUD_NAME."
+            );
+        }
+        return '';
+    }
+
     const t = ['f_auto', 'q_auto'];
     if (width) t.push(`w_${width}`);
     if (height) t.push(`h_${height}`, 'c_fill');
-    return `https://res.cloudinary.com/${cloud}/image/upload/${t.join(',')}/${publicId}`;
+    return `https://res.cloudinary.com/${CLOUDINARY_CLOUD}/image/upload/${t.join(',')}/${publicId}`;
 };

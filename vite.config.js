@@ -1,5 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+// The API's location lives in ONE file — see deploy.config.js. No URL is
+// written here, so this file never needs touching when the API moves.
+import { API_DEV } from './deploy.config.js';
 
 export default defineConfig({
     plugins: [react()],
@@ -14,7 +17,19 @@ export default defineConfig({
         // the cookie stays first-party and there is no CORS preflight before
         // every request.
         proxy: {
-            '/api': { target: 'https://sahara-public-school-backend.vercel.app', changeOrigin: true },
+            // Goes to the LOCAL backend, so `npm run dev` tests the code in
+            // this working tree. This used to point at the deployed API, which
+            // meant local development silently read and WROTE the live school's
+            // database — and a local backend change could never be tested at all.
+            //
+            // To aim a dev session at a deployed API on purpose (checking a UI
+            // change against real data, say), override it for that run rather
+            // than editing anything:
+            //   VITE_PROXY_TARGET=https://your-api.vercel.app npm run dev
+            '/api': {
+                target: process.env.VITE_PROXY_TARGET || API_DEV,
+                changeOrigin: true,
+            },
         },
     },
     build: {

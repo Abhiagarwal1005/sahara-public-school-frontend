@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "npm run check:vercel && vite build",
+    "preview": "vite preview",
+    "sync:vercel": "node scripts/sync-vercel.mjs",
+    "check:vercel": "node scripts/sync-vercel.mjs --check"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.51.1",

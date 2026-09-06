@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-    useStockItems, useStockItem, useCreateSale, useAdjustStock, useSales,
-    useStudents, useLowStock, useMovements, useCreateItem,
+    useStockItems, useCreateSale, useAdjustStock, useSales,
+    useStudents, useLowStock, useMovements, useCreateItem, useUpdateItem, useVoidSale,
 } from '../hooks/queries';
 import { money, num, date, toInputDate } from '../lib/format';
 import {
-    Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
-    Async, PageTitle, Tabs, Pill, EmptyState, cx,
+    Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal, ReasonModal,
+    Async, PageTitle, Tabs, Pill, EmptyState, Loading, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
@@ -193,6 +193,155 @@ function AddItem({ open, onClose }) {
 }
 
 // ---- items list ----
+// ---------------------------------------------------------------------------
+// Editing an item — rates and reorder levels, never the quantity.
+//
+// The service refuses `currentStock` outright, and that is the whole point:
+// stock moves through a purchase, a sale or an adjustment, each of which
+// writes a movement row. A number typed straight into the item would have no
+// source, and the year-end physical count would have nothing to explain it.
+//
+// Existing variants keep their stock — only the label and the rates change.
+// ---------------------------------------------------------------------------
+function EditItem({ item, onClose }) {
+    const update = useUpdateItem();
+    const [form, setForm] = useState(null);
+
+    useEffect(() => {
+        if (!item) return setForm(null);
+        setForm({
+            name: item.name || '',
+            costPrice: String(item.costPrice ?? ''),
+            sellPrice: String(item.sellPrice ?? ''),
+            lowStockAt: String(item.lowStockAt ?? ''),
+            variants: (item.variants || []).map((v) => ({
+                _id: v._id,
+                label: v.label,
+                costPrice: String(v.costPrice ?? ''),
+                sellPrice: String(v.sellPrice ?? ''),
+                lowStockAt: String(v.lowStockAt ?? ''),
+                currentStock: v.currentStock,
+            })),
+        });
+    }, [item]);
+
+    if (!item || !form) return null;
+
+    const setVariant = (i, key) => (e) => {
+        const next = [...form.variants];
+        next[i] = { ...next[i], [key]: e.target.value };
+        setForm({ ...form, variants: next });
+    };
+
+    const save = async () => {
+        const body = { id: item._id, name: form.name.trim() };
+
+        if (item.hasVariants) {
+            body.variants = form.variants.map((v) => ({
+                _id: v._id,
+                label: v.label.trim(),
+                costPrice: Number(v.costPrice) || 0,
+                sellPrice: Number(v.sellPrice) || 0,
+                lowStockAt: Number(v.lowStockAt) || 0,
+            }));
+        } else {
+            body.costPrice = Number(form.costPrice) || 0;
+            body.sellPrice = Number(form.sellPrice) || 0;
+            body.lowStockAt = Number(form.lowStockAt) || 0;
+        }
+
+        await update.mutateAsync(body);
+        onClose();
+    };
+
+    return (
+        <Modal open onClose={onClose} title={`Edit ${item.name}`} wide
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={update.isPending}
+                           disabled={!form.name.trim()} onClick={save}>Save</Button>
+               </>}>
+            <div className="flex flex-col gap-3">
+                <Field label="Name" required>
+                    <Input value={form.name} autoFocus onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </Field>
+
+                {item.hasVariants ? (
+                    <Table head={['Size', { label: 'In stock', align: 'right' }, { label: 'Cost', align: 'right' },
+                                  { label: 'Sell', align: 'right' }, { label: 'Reorder at', align: 'right' }]}
+                           minWidth={480} isEmpty={false}>
+                        {form.variants.map((v, i) => (
+                            <Tr key={v._id}>
+                                <Td><Input className="w-24 py-1 text-[12px]" value={v.label} onChange={setVariant(i, 'label')} /></Td>
+                                {/* Read-only on purpose — quantity moves through a purchase,
+                                    a sale or an adjustment, never through this form. */}
+                                <Td align="right" className="text-ink-3">{v.currentStock}</Td>
+                                <Td align="right"><Input className="w-20 py-1 text-right text-[12px]" inputMode="numeric" value={v.costPrice} onChange={setVariant(i, 'costPrice')} /></Td>
+                                <Td align="right"><Input className="w-20 py-1 text-right text-[12px]" inputMode="numeric" value={v.sellPrice} onChange={setVariant(i, 'sellPrice')} /></Td>
+                                <Td align="right"><Input className="w-20 py-1 text-right text-[12px]" inputMode="numeric" value={v.lowStockAt} onChange={setVariant(i, 'lowStockAt')} /></Td>
+                            </Tr>
+                        ))}
+                    </Table>
+                ) : (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                        <Field label="Cost price"><Input inputMode="numeric" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: e.target.value })} /></Field>
+                        <Field label="Sell price"><Input inputMode="numeric" value={form.sellPrice} onChange={(e) => setForm({ ...form, sellPrice: e.target.value })} /></Field>
+                        <Field label="Reorder at"><Input inputMode="numeric" value={form.lowStockAt} onChange={(e) => setForm({ ...form, lowStockAt: e.target.value })} /></Field>
+                    </div>
+                )}
+
+                <p className="text-[11.5px] text-ink-3">
+                    Quantity is not editable here — it moves through a purchase, a sale or a stock
+                    adjustment, each of which leaves a movement row behind it. A new rate applies to
+                    future sales only; bills already raised keep the rate they were sold at.
+                </p>
+            </div>
+        </Modal>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// One item's movement history — every piece in and out, with what it left
+// behind. This is the answer to "the count says 40 but the shelf has 35".
+//
+// The route and the hook both existed; nothing opened them.
+// ---------------------------------------------------------------------------
+const MOVEMENT_LABEL = {
+    OPENING: 'Opening', PURCHASE_IN: 'Purchase', SALE_OUT: 'Sale',
+    RETURN_IN: 'Return', ADJUST: 'Adjustment',
+};
+
+function Movements({ item, onClose }) {
+    const moves = useMovements(item?._id, { limit: 100 });
+    if (!item) return null;
+
+    return (
+        <Modal open onClose={onClose} title={`${item.name} — movement history`} wide
+               footer={<Button onClick={onClose}>Close</Button>}>
+            {moves.isPending ? <Loading rows={4} /> : (
+                <Table head={['Date', 'Type', 'Size', { label: 'Qty', align: 'right' },
+                              { label: 'Balance after', align: 'right' }, 'Note']}
+                       isEmpty={!moves.data?.items?.length} empty="No movements recorded" minWidth={600}>
+                    {(moves.data?.items || []).map((m) => (
+                        <Tr key={m._id}>
+                            <Td className="font-mono text-[11.5px] text-ink-3 whitespace-nowrap">{date(m.date)}</Td>
+                            <Td className="whitespace-nowrap">{MOVEMENT_LABEL[m.type] || m.type}</Td>
+                            <Td>{m.variantLabel || '—'}</Td>
+                            {/* Signed: positive in, negative out. One column, so it sums
+                                to a balance without adding two together. */}
+                            <Td align="right" className={m.qty > 0 ? 'text-good font-semibold' : 'text-crit font-semibold'}>
+                                {m.qty > 0 ? `+${m.qty}` : m.qty}
+                            </Td>
+                            <Td align="right">{m.balanceAfter}</Td>
+                            <Td className="text-[12px] text-ink-2">{m.note || '—'}</Td>
+                        </Tr>
+                    ))}
+                </Table>
+            )}
+        </Modal>
+    );
+}
+
 function Items({ onSell }) {
     // Cost price is the school's margin. The Accountant still enters it when
     // adding an item — this only keeps it out of the browsable catalogue,
@@ -200,6 +349,8 @@ function Items({ onSell }) {
     const isAdmin = useAuth((s) => s.user?.role) === 'Admin';
     const [q, setQ] = useState({ search: '', category: '' });
     const [adding, setAdding] = useState(false);
+    const [editing, setEditing] = useState(null);
+    const [viewing, setViewing] = useState(null);
     const items = useStockItems(q);
     const low = useLowStock();
 
@@ -246,7 +397,17 @@ function Items({ onSell }) {
                                 key={item._id}
                                 title={item.name}
                                 hint={`${item.category}${item.hasVariants ? ` · ${item.variants.length} sizes` : ''}`}
-                                actions={<Can perm="stock.sell"><Button size="sm" variant="primary" onClick={() => onSell(item)}>Sell</Button></Can>}
+                                actions={<>
+                                    <Can perm="stock.view">
+                                        <Button size="sm" onClick={() => setViewing(item)}>History</Button>
+                                    </Can>
+                                    <Can perm="stock.manage">
+                                        <Button size="sm" onClick={() => setEditing(item)}>Edit</Button>
+                                    </Can>
+                                    <Can perm="stock.sell">
+                                        <Button size="sm" variant="primary" onClick={() => onSell(item)}>Sell</Button>
+                                    </Can>
+                                </>}
                             >
                                 {item.hasVariants ? (
                                     <Table head={[
@@ -293,6 +454,9 @@ function Items({ onSell }) {
                     </div>
                 )}
             </Async>
+
+            <EditItem item={editing} onClose={() => setEditing(null)} />
+            <Movements item={viewing} onClose={() => setViewing(null)} />
         </>
     );
 }
@@ -467,7 +631,9 @@ function NewSale({ preselect, onDone }) {
 // ---- sales register ----
 function Register() {
     const [day, setDay] = useState(toInputDate(new Date()));
+    const [voiding, setVoiding] = useState(null);
     const sales = useSales({ date: day, limit: 100 });
+    const voidSale = useVoidSale();
 
     return (
         <>
@@ -478,8 +644,8 @@ function Register() {
                 <Async query={sales}>
                     {(d) => (
                         <Table head={['Bill', { label: 'Student', primary: true }, 'Class', 'Items', { label: 'Total', align: 'right' },
-                                      { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }]}
-                               isEmpty={!d.items.length} empty="No sales on this date" minWidth={720}>
+                                      { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, '']}
+                               isEmpty={!d.items.length} empty="No sales on this date" minWidth={800}>
                             {d.items.map((s) => (
                                 <Tr key={s._id}>
                                     <Td className="font-mono text-[11.5px]">{s.billNo}</Td>
@@ -491,12 +657,39 @@ function Register() {
                                     <Td align="right">{money(s.total)}</Td>
                                     <Td align="right">{money(s.paidAmount)}</Td>
                                     <Td align="right" className={s.dueAmount > 0 ? 'text-warn font-semibold' : ''}>{money(s.dueAmount)}</Td>
+                                    <Td>
+                                        {/* A bill that has since taken money is refused by the server
+                                            (409) — the receipt would be stranded. The button still
+                                            shows, so the message explains why rather than the option
+                                            silently not being there. */}
+                                        <Can perm="stock.adjust">
+                                            <Button size="sm" variant="danger" onClick={() => setVoiding(s)}>Void</Button>
+                                        </Can>
+                                    </Td>
                                 </Tr>
                             ))}
                         </Table>
                     )}
                 </Async>
             </Card>
+
+            <ReasonModal
+                open={Boolean(voiding)}
+                onClose={() => setVoiding(null)}
+                loading={voidSale.isPending}
+                title="Void this bill?"
+                what={voiding ? `Bill ${voiding.billNo} — ${voiding.studentName}, ${money(voiding.total)}` : ''}
+                consequence={
+                    'The stock goes back in, the credit portion comes off the student, and the cash '
+                    + 'portion is reversed in the day book. If money has already been received against '
+                    + 'this bill it cannot be voided — settle that receipt first.'
+                }
+                confirmLabel="Void bill"
+                onConfirm={async (reason) => {
+                    await voidSale.mutateAsync({ id: voiding._id, reason });
+                    setVoiding(null);
+                }}
+            />
         </>
     );
 }

@@ -5,7 +5,10 @@ import {
     useSessions, useCreateSession, useActivateSession, useActiveSession,
 } from '../hooks/queries';
 import { useAuth } from '../store/auth';
-import { money, date, toInputDate } from '../lib/format';
+import {
+    money, date, toInputDate, monthLabel, monthShort,
+    sessionMonths, sessionDates, suggestSessionName, isSaneSessionName,
+} from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
     Async, PageTitle, Tabs, Pill, statusPill, EmptyState, cx,
@@ -306,18 +309,180 @@ function Classes() {
 }
 
 // ---- session ----
+// ---------------------------------------------------------------------------
+// Creating an academic session.
+//
+// Until this screen existed the only way to get a session was
+// `npm run seed:session` on the backend — which means nobody could set the
+// school up without shell access, and the app answers 409 NO_ACTIVE_SESSION
+// on almost every screen until one exists.
+//
+// The form asks for the NAME and derives the rest. "2026-27" already implies
+// April 2026 to March 2027 and its twelve billable months (the same rule as
+// scripts/seedSession.js), so asking four questions instead of one would only
+// create four chances to disagree with the seeder.
+// ---------------------------------------------------------------------------
+function NewSession({ open, onClose, hasActive, existing = [] }) {
+    const activate = useActivateSession();
+    // Activating is the second half of creating the FIRST session — without an
+    // active session the app is unusable, so it must not be a step you can
+    // forget.
+    const create = useCreateSession(async (created) => {
+        if (makeActive && created?._id) await activate.mutateAsync(created._id);
+        onClose();
+    });
+
+    const [name, setName] = useState('');
+    // Which months this session bills. Most schools bill all twelve; some bill
+    // ten (April–January), which is why these are individually toggleable
+    // rather than derived and hidden.
+    const [months, setMonths] = useState([]);
+    const [dates, setDates] = useState({ startDate: '', endDate: '' });
+    const [makeActive, setMakeActive] = useState(true);
+    const [touched, setTouched] = useState(false);
+
+    // Reset every time the dialog opens, and default the name to the session
+    // today falls in (or the year after the newest one on record).
+    useEffect(() => {
+        if (!open) return;
+        const newest = [...existing].map((s) => s.name).sort().pop();
+        const suggested = newest
+            ? `${Number(newest.slice(0, 4)) + 1}-${String((Number(newest.slice(0, 4)) + 2) % 100).padStart(2, "0")}`
+            : suggestSessionName();
+        setName(suggested);
+        setMonths(sessionMonths(suggested));
+        setDates(sessionDates(suggested));
+        setMakeActive(!hasActive);
+        setTouched(false);
+    }, [open, hasActive, existing]);
+
+    // Typing a new name re-derives the dates and months under it
+    const rename = (value) => {
+        setName(value);
+        setTouched(true);
+        if (isSaneSessionName(value)) {
+            setMonths(sessionMonths(value));
+            setDates(sessionDates(value));
+        }
+    };
+
+    const allMonths = sessionMonths(name);
+    const nameOk = isSaneSessionName(name);
+    const duplicate = existing.some((s) => s.name === name);
+    const canSave = nameOk && !duplicate && months.length > 0 && dates.startDate && dates.endDate;
+
+    const toggleMonth = (m) =>
+        setMonths((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m].sort()));
+
+    return (
+        <Modal open={open} onClose={onClose} title="New academic session" wide
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={create.isPending || activate.isPending} disabled={!canSave}
+                           onClick={() => create.mutate({
+                               name: name.trim(),
+                               startDate: dates.startDate,
+                               endDate: dates.endDate,
+                               feeMonths: months,
+                           })}>
+                       {makeActive ? "Create & activate" : "Create"}
+                   </Button>
+               </>}>
+            <div className="flex flex-col gap-3.5">
+                <Field label="Session" required hint="the format is 2026-27 — April to March"
+                       error={touched && !nameOk ? "Use the 2026-27 format, where the second half is the next year"
+                            : duplicate ? `${name} already exists` : undefined}>
+                    <Input value={name} autoFocus placeholder="2026-27" onChange={(e) => rename(e.target.value)} />
+                </Field>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Starts" required>
+                        <Input type="date" value={dates.startDate}
+                               onChange={(e) => setDates({ ...dates, startDate: e.target.value })} />
+                    </Field>
+                    <Field label="Ends" required>
+                        <Input type="date" value={dates.endDate}
+                               onChange={(e) => setDates({ ...dates, endDate: e.target.value })} />
+                    </Field>
+                </div>
+
+                <Field label={`Fee months — ${months.length} selected`}
+                       hint="the months fees are raised for · unselect any the school does not bill">
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {allMonths.map((m) => {
+                            const on = months.includes(m);
+                            return (
+                                <button key={m} type="button" onClick={() => toggleMonth(m)}
+                                        title={monthLabel(m)}
+                                        className={cx(
+                                            "px-2.5 py-1.5 rounded-md border text-[12px] font-mono font-semibold",
+                                            on ? "bg-brand text-white border-brand"
+                                               : "bg-paper-2 text-ink-3 border-line-2 hover:bg-white"
+                                        )}>
+                                    {monthShort(m)}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </Field>
+
+                <label className="flex items-start gap-2.5 text-[13px] cursor-pointer">
+                    <input type="checkbox" className="mt-0.5 w-4 h-4 accent-brand shrink-0"
+                           checked={makeActive} onChange={(e) => setMakeActive(e.target.checked)} />
+                    <span>
+                        Make this the active session
+                        <span className="block text-[11.5px] text-ink-3">
+                            {hasActive
+                                ? "The current session is closed — its data stays readable, never editable."
+                                : "Required — without an active session every other screen returns an error."}
+                        </span>
+                    </span>
+                </label>
+
+                <p className="text-[11.5px] text-ink-3">
+                    Classes are created separately, on the Classes tab — do that next, before adding students.
+                </p>
+            </div>
+        </Modal>
+    );
+}
+
 function SessionTab() {
     const sessions = useSessions();
     const active = useActiveSession();
     const activate = useActivateSession();
+    const [adding, setAdding] = useState(false);
+
+    const list = sessions.data || [];
+    // active.isError means the backend answered NO_ACTIVE_SESSION — the state
+    // the app cannot work in, so it gets said plainly rather than left for the
+    // user to infer from errors on every other screen.
+    const hasActive = Boolean(active.data) && !active.isError;
 
     return (
         <>
+            {!hasActive && !sessions.isLoading && (
+                <div className="bg-warn-bg border border-warn text-warn rounded-md px-4 py-3 text-[12.5px]">
+                    <b>There is no active academic session.</b> Every other screen — students, fees,
+                    attendance, salary — will return an error until one exists.
+                    {list.length > 0
+                        ? ' Activate one below.'
+                        : ' Create one with the button below to set the school up.'}
+                </div>
+            )}
+
+            <Toolbar>
+                <Spacer />
+                <Button variant="primary" onClick={() => setAdding(true)}>+ Session</Button>
+            </Toolbar>
+
             <Card title="Academic session" hint="the partition key for the whole app">
                 <Async query={sessions}>
-                    {(list) => (
+                    {() => (
                         <Table head={['Session', 'Starts', 'Ends', { label: 'Fee months', align: 'right' }, 'Status', '']}
-                               isEmpty={!list.length} empty="No sessions" minWidth={560}>
+                               isEmpty={!list.length}
+                               empty="No sessions yet — use + Session to create the first one"
+                               minWidth={560}>
                             {list.map((s) => (
                                 <Tr key={s._id}>
                                     <Td className="font-semibold">{s.name}</Td>
@@ -353,6 +518,9 @@ function SessionTab() {
                     </div>
                 </div>
             </Card>
+
+            <NewSession open={adding} onClose={() => setAdding(false)}
+                        hasActive={hasActive} existing={list} />
         </>
     );
 }

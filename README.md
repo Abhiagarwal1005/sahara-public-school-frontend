@@ -11,10 +11,11 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-The dev server proxies `/api` to `localhost:8000` (see `vite.config.js`).
+The dev server proxies `/api` to `localhost:8000` (from `deploy.config.js`).
 That means development behaves the same way production will — same origin, so
 the refresh cookie stays first-party and there is no CORS preflight before
-every request.
+every request, and it means `npm run dev` tests **your** backend rather than
+the deployed one.
 
 The backend needs to be running first:
 
@@ -27,6 +28,9 @@ cd ../Sps-backend && npm run dev
 ## How it is put together
 
 ```
+deploy.config.js     the API's location — the ONE place it is configured
+scripts/
+└─ sync-vercel.mjs   writes API_PROD into vercel.json (npm run sync:vercel)
 src/
 ├─ lib/
 │  ├─ api.js          axios + refresh queue + error normalisation
@@ -104,25 +108,59 @@ changing app code does not invalidate the user's cached vendor bundle.
 
 ## Deploying
 
-`vercel.json` rewrites every path to `index.html`. Without it a refresh on
-`/salary` or `/leads` returns a 404 — the router only exists in the browser.
+### Everything deployment-specific lives in ONE file
 
-The frontend and the API should answer on **one origin**. Then `VITE_API_URL`
-stays empty, the refresh cookie is first-party, and CORS preflight never
-happens.
+[`deploy.config.js`](deploy.config.js):
 
-If the API is a separate Vercel project, the tidiest way to keep one origin is
-to proxy it from here — add this **above** the catch-all rewrite:
-
-```json
-{ "source": "/api/:path*", "destination": "https://YOUR-API.vercel.app/api/:path*" }
+```js
+export const API_DEV          = 'http://localhost:8000';                          // npm run dev
+export const API_PROD         = 'https://sahara-public-school-backend.vercel.app'; // deployed
+export const CLOUDINARY_CLOUD = 'demo';                                            // for image URLs
 ```
 
-Order matters: the `/(.*)` rule would otherwise swallow `/api` and serve
-`index.html` to every request.
+Nothing deployment-specific is written anywhere else. `vite.config.js` reads
+`API_DEV` for the dev proxy, `vercel.json`'s `/api` rewrite is generated from
+`API_PROD`, and `lib/cloudinary.js` reads `CLOUDINARY_CLOUD`.
 
-Only if the browser must call the API on a different domain directly: set
-`VITE_API_URL` **and** set `COOKIE_SAMESITE=none` in the backend's environment.
-Be aware that this makes the refresh cookie third-party — Safari blocks those
-outright, so those users are logged out every 15 minutes when the access token
-expires. The proxy above avoids the problem entirely.
+`CLOUDINARY_CLOUD` must match `CLOUDINARY_CLOUD_NAME` in the **backend's**
+environment. It is only needed to *display* images — uploading is signed by the
+backend — but get it wrong and every uploaded image 404s while uploads keep
+appearing to succeed. Leave it `''` if the school has no Cloudinary account;
+uploads are optional and the UI hides the upload box.
+
+**When the API moves, that is the whole job:**
+
+```bash
+# 1. edit API_PROD in deploy.config.js
+npm run sync:vercel     # 2. writes it into vercel.json
+                        # 3. commit deploy.config.js + vercel.json
+```
+
+`npm run build` refuses to build if the two disagree, so a stale `vercel.json`
+can never ship unnoticed. The reason it is generated rather than read at
+runtime: `vercel.json` is static — Vercel does not substitute environment
+variables into it, and it is read when the deployment is set up, *before* the
+build runs. A literal is the only option, so the literal is written from the
+one source of truth.
+
+### Nothing else needs changing
+
+`VITE_API_URL` stays **empty in every environment**, including production. The
+browser then calls `/api` on its own origin: in development vite's proxy
+forwards it, in production Vercel's rewrite does. One origin means the refresh
+cookie is first-party and CORS preflight never happens.
+
+`vercel.json` also rewrites every other path to `index.html` — without it a
+refresh on `/salary` or `/leads` returns a 404, because the router only exists
+in the browser. Order matters: the `/api` rule must sit **above** the `/(.*)`
+catch-all, or the catch-all swallows `/api` and serves HTML to every API call.
+`npm run check:vercel` fails if the `/api` rule is missing entirely.
+
+### The one case that needs more than this
+
+Only if the browser must call the API on a different domain **directly**
+(no rewrite): set `VITE_API_URL` **and** set `COOKIE_SAMESITE=none` in the
+backend's environment. Be aware that this makes the refresh cookie
+third-party — Safari blocks those outright, so those users are logged out
+every 15 minutes when the access token expires. The rewrite avoids the problem
+entirely, which is why it is the default.

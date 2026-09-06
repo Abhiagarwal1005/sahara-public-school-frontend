@@ -41,6 +41,8 @@ const NAV = [
       icon: <><path d="M3.2 1.8h9.6v12.4l-2-1.2-1.6 1.2-1.6-1.2-1.6 1.2-1.6-1.2-1.2.9z" /><path d="M5.6 5.2h4.8M5.6 8h4.8" /></> },
     { to: '/reports', label: 'Reports', perm: 'report.daybook',
       icon: <><path d="M2 13.4h12" /><rect x="3" y="7.6" width="2.6" height="4" /><rect x="6.8" y="4.4" width="2.6" height="7.2" /><rect x="10.6" y="2.2" width="2.6" height="9.4" /></> },
+    { to: '/activity', label: 'Activity', perm: 'audit.view',
+      icon: <><path d="M8 3.6v4.6l3 1.8" /><circle cx="8" cy="8" r="6.2" /></> },
     { to: '/settings', label: 'Settings', adminOnly: true,
       icon: <><circle cx="8" cy="8" r="2.2" /><path d="M8 1.4v1.8M8 12.8v1.8M14.6 8h-1.8M3.2 8H1.4M12.7 3.3l-1.3 1.3M4.6 11.4l-1.3 1.3M12.7 12.7l-1.3-1.3M4.6 4.6L3.3 3.3" /></> },
 ];

@@ -39,16 +39,32 @@ function SlipDetail({ slip: row, onClose }) {
     const sundayDays = slip.sundayDays ?? 0;
     const unmarked = slip.unmarkedDays ?? 0;
 
+    // Late arrivals. Slips generated before this rule existed have none of
+    // these fields, so they all fall back to 0 and the slip renders exactly as
+    // it did before.
+    const lateDays = slip.lateDays ?? 0;
+    const lateAllowed = slip.lateAllowed ?? 0;
+    const lateChargeable = slip.lateChargeable ?? 0;
+    const lateCut = slip.lateDeductionDays ?? 0;
+
     // The same sum the server did, written out in words. A slip that shows
     // ₹1,666 against a ₹10,000 salary has to say WHY on its face, or the
     // first thing that happens is a phone call.
     const paidParts = [
         slip.presentDays && `${slip.presentDays} present`,
+        lateDays && `${lateDays} late`,
         slip.halfDays && `${slip.halfDays} half (${slip.halfDays * 0.5})`,
         slip.leaveDays && `${slip.leaveDays} leave`,
         sundayDays && `${sundayDays} Sunday${sundayDays > 1 ? 's' : ''}`,
         slip.holidayDays && `${slip.holidayDays} holiday${slip.holidayDays > 1 ? 's' : ''}`,
     ].filter(Boolean);
+
+    // The additive days joined with '+', then the late cut appended with its own
+    // minus. Folding the cut into the '+' list rendered it as "+ − 1 for late".
+    const paidFormula = [
+        paidParts.join(' + '),
+        lateCut ? `− ${lateCut} for late` : '',
+    ].filter(Boolean).join(' ');
 
     const rows = [
         ['Monthly salary (snapshot)', money(slip.grossSalary)],
@@ -57,12 +73,20 @@ function SlipDetail({ slip: row, onClose }) {
         ['Days in month (divisor)', monthDays],
         ['Per-day rate', `${money(slip.grossSalary)} ÷ ${monthDays} = ${money(slip.perDayRate)}`],
         ['Present', slip.presentDays],
+        // A late day is paid in full; only the count above the allowance costs
+        // anything, and that shows as its own line below.
+        ['Late (paid in full)', `${lateDays}${lateAllowed ? ` · ${lateAllowed} allowed` : ''}`],
         ['Half days (½ rate)', slip.halfDays],
         ['Leave (paid)', slip.leaveDays],
         ['Sundays (paid)', sundayDays],
         ['School holidays (paid)', slip.holidayDays],
         ['Absent (not paid)', slip.absentDays],
         ['Not marked (not paid)', unmarked],
+        // Only shown when it actually cost something — a teacher who stayed
+        // inside their allowance should not see a deduction line reading zero.
+        ...(lateCut > 0
+            ? [['Late deduction', `${lateChargeable} late ÷ 4 = −${lateCut} day${lateCut > 1 ? 's' : ''}`]]
+            : []),
     ];
 
     return (
@@ -110,8 +134,8 @@ function SlipDetail({ slip: row, onClose }) {
                         <div className="flex justify-between text-[13px]">
                             <b>Days paid</b><b className="tnum">{slip.payableDays}</b>
                         </div>
-                        {paidParts.length > 0 && (
-                            <p className="text-[11.5px] text-ink-3 mt-0.5">{paidParts.join(' + ')}</p>
+                        {paidFormula && (
+                            <p className="text-[11.5px] text-ink-3 mt-0.5">{paidFormula}</p>
                         )}
                     </div>
                     <div className="flex justify-between px-3 py-2 bg-paper-2 text-[13px]">
@@ -128,6 +152,18 @@ function SlipDetail({ slip: row, onClose }) {
                             {unmarked} day{unmarked > 1 ? 's are' : ' is'} not marked in attendance, so
                             {unmarked > 1 ? ' they are' : ' it is'} not paid. Mark
                             {unmarked > 1 ? ' those days' : ' that day'} and regenerate if that is wrong.
+                        </div>
+                    )}
+                    {/* The slip has to answer "why is a day missing" on its own face,
+                        or the first thing that happens is a phone call. */}
+                    {lateCut > 0 && (
+                        <div className="px-3 py-2 text-[11.5px] text-warn bg-warn-bg">
+                            {lateDays} late arrival{lateDays > 1 ? 's' : ''} this month
+                            {lateAllowed > 0
+                                ? ` — ${lateAllowed} allowed, so ${lateChargeable} counted.`
+                                : ' — none are forgiven for this teacher.'}
+                            {' '}Every 4 counted lates cost one day, so that is −{lateCut} day
+                            {lateCut > 1 ? 's' : ''} ({money(lateCut * slip.perDayRate)}).
                         </div>
                     )}
                     {(slip.adjustments || []).map((a) => (
@@ -309,12 +345,18 @@ function SlipDetail({ slip: row, onClose }) {
                             {[
                                 ['Days in month', monthDays],
                                 ['Present', slip.presentDays],
+                                ['Late (paid in full)', `${lateDays}${lateAllowed ? ` · ${lateAllowed} allowed` : ''}`],
                                 ['Half days (\u00bd)', slip.halfDays],
                                 ['Leave (paid)', slip.leaveDays],
                                 ['Sundays (paid)', sundayDays],
                                 ['School holidays (paid)', slip.holidayDays],
                                 ['Absent (not paid)', slip.absentDays],
                                 ['Not marked (not paid)', unmarked],
+                                // On paper too: this is the slip the teacher signs, so the
+                                // deduction has to be explained where they can see it.
+                                ...(lateCut > 0
+                                    ? [['Late deduction', `${lateChargeable} \u00f7 4 = \u2212${lateCut} day${lateCut > 1 ? 's' : ''}`]]
+                                    : []),
                             ].map(([k, v]) => (
                                 <tr key={k}>
                                     <td style={{ padding: '3px 8px', color: '#333' }}>{k}</td>
@@ -327,10 +369,10 @@ function SlipDetail({ slip: row, onClose }) {
                                     {slip.payableDays}
                                 </td>
                             </tr>
-                            {paidParts.length > 0 && (
+                            {paidFormula && (
                                 <tr>
                                     <td colSpan={2} style={{ padding: '0 8px 6px', fontSize: '10.5px', color: '#555' }}>
-                                        {paidParts.join(' + ')}
+                                        {paidFormula}
                                     </td>
                                 </tr>
                             )}
@@ -456,16 +498,22 @@ function Slips({ month }) {
                         )}
 
                         <Card title={`Salary slips — ${monthLabel(month)}`} hint="built from attendance">
-                            <Table head={['Teacher', { label: 'Present', align: 'right' }, { label: 'Half', align: 'right' },
+                            <Table head={['Teacher', { label: 'Present', align: 'right' }, { label: 'Late', align: 'right' },
+                                          { label: 'Half', align: 'right' },
                                           { label: 'Absent', align: 'right' }, { label: 'Gross', align: 'right' },
                                           { label: 'Net', align: 'right' }, 'Status', '']}
                                    isEmpty={!d.slips.length}
                                    empty="No slips generated for this month yet — use the button above"
-                                   minWidth={760}>
+                                   minWidth={820}>
                                 {d.slips.map((s) => (
                                     <Tr key={s._id}>
                                         <Td className="font-semibold whitespace-nowrap">{s.teacherName}</Td>
                                         <Td align="right">{s.presentDays}</Td>
+                                        {/* Amber only when the lates actually cost something — a
+                                            teacher inside their allowance is not a problem to flag. */}
+                                        <Td align="right" className={s.lateDeductionDays ? 'text-warn font-semibold' : ''}>
+                                            {s.lateDays || 0}
+                                        </Td>
                                         <Td align="right">{s.halfDays}</Td>
                                         <Td align="right" className={s.absentDays ? 'text-crit' : ''}>{s.absentDays}</Td>
                                         <Td align="right">{num(s.grossSalary)}</Td>

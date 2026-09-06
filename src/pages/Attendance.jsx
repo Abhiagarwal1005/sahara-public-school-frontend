@@ -11,12 +11,24 @@ import {
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
 
+// Late sits next to Present and carries the same green family on purpose: the
+// teacher DID come, so the day is paid in full. What it costs is decided on the
+// salary slip, from the count above that teacher's allowance — not here.
 const STATUSES = [
     { key: 'Present', short: 'P', tone: 'bg-brand text-white border-brand' },
+    { key: 'Late', short: 'LT', tone: 'bg-brand-2 text-white border-brand-2' },
     { key: 'Absent', short: 'A', tone: 'bg-crit text-white border-crit' },
     { key: 'HalfDay', short: 'H', tone: 'bg-warn text-white border-warn' },
     { key: 'Leave', short: 'L', tone: 'bg-ink-3 text-white border-ink-3' },
 ];
+
+// One letter per status, written out rather than taken from status[0].
+// 'Late' and 'Leave' both start with L, and so do 'HalfDay' and 'Holiday' with
+// H — the monthly grid used to slice the first character and showed the two
+// pairs identically, which is the one thing an attendance grid must not do.
+const SHORT = {
+    Present: 'P', Late: 'LT', Absent: 'A', HalfDay: 'H', Leave: 'L', Holiday: 'HO',
+};
 
 // ---------------------------------------------------------------------------
 // Teacher sheet — everyone defaults to Present. In a school where most
@@ -49,8 +61,9 @@ function TeacherDaily() {
                 )}
                 <Spacer />
                 <span className="tb-wide text-[12.5px] text-ink-2">
-                    Present <b>{counts.Present || 0}</b> · Absent <b>{counts.Absent || 0}</b> ·
-                    Half <b>{counts.HalfDay || 0}</b> · Leave <b>{counts.Leave || 0}</b>
+                    Present <b>{counts.Present || 0}</b> · Late <b>{counts.Late || 0}</b> ·
+                    Absent <b>{counts.Absent || 0}</b> · Half <b>{counts.HalfDay || 0}</b> ·
+                    Leave <b>{counts.Leave || 0}</b>
                 </span>
                 <Can perm="attendance.teacher.mark">
                     <Button variant="primary" loading={mark.isPending} disabled={sheet.data?.isSunday}
@@ -66,7 +79,7 @@ function TeacherDaily() {
             <Card title={`Teacher attendance — ${date(day)}`}
                   hint={sheet.data?.isSunday
                       ? 'Sunday — weekly off, paid automatically'
-                      : 'everyone defaults to Present · change only the exceptions'}>
+                      : 'everyone defaults to Present · change only the exceptions · LT = late (paid, counted against the allowance)'}>
                 <Async query={sheet}>
                     {(d) => (
                         <Table head={['Teacher', 'Designation', { label: 'Code', align: 'right' }, 'Mark']}
@@ -114,14 +127,22 @@ function TeacherDaily() {
 
 function TeacherMonthly({ month }) {
     const grid = useTeacherGrid(month);
-    const cellTone = { Present: 'bg-good-bg text-good', Absent: 'bg-crit-bg text-crit', HalfDay: 'bg-warn-bg text-warn' };
+    const cellTone = {
+        Present: 'bg-good-bg text-good',
+        Late: 'bg-brand-soft text-brand',
+        Absent: 'bg-crit-bg text-crit',
+        HalfDay: 'bg-warn-bg text-warn',
+        Leave: 'bg-line text-ink-2',
+        Holiday: 'bg-paper-2 text-ink-3',
+    };
 
     return (
-        <Card title={`${monthLabel(month)} — monthly grid`} hint="P present · A absent · H half · grey = Sunday">
+        <Card title={`${monthLabel(month)} — monthly grid`}
+              hint="P present · LT late · A absent · H half · L leave · grey = Sunday">
             <Async query={grid}>
                 {(g) => (
                     <div className="overflow-x-auto">
-                        <table className="w-full border-collapse text-[12px]" style={{ minWidth: 820 }}>
+                        <table className="w-full border-collapse text-[12px]" style={{ minWidth: 900 }}>
                             <thead>
                                 <tr>
                                     <th className="sticky left-0 bg-paper-2 text-left px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-ink-3 border-b border-line">Teacher</th>
@@ -133,6 +154,7 @@ function TeacherMonthly({ month }) {
                                         </th>
                                     ))}
                                     <th className="px-2 py-2 text-right font-mono text-[10px] uppercase text-ink-3 border-b border-line">P</th>
+                                    <th className="px-2 py-2 text-right font-mono text-[10px] uppercase text-ink-3 border-b border-line">LT</th>
                                     <th className="px-2 py-2 text-right font-mono text-[10px] uppercase text-ink-3 border-b border-line">A</th>
                                 </tr>
                             </thead>
@@ -145,17 +167,19 @@ function TeacherMonthly({ month }) {
                                             const s = r.days[i + 1];
                                             return (
                                                 <td key={i} className={cx('px-1 py-1.5 text-center', sunday && 'bg-paper-2')}>
-                                                    <span className={cx('inline-block w-[19px] h-[19px] leading-[19px] rounded font-mono text-[10px] font-semibold',
+                                                    <span className={cx(// Wide enough for the two-character codes (LT, HO) without wrapping
+                                                                        'inline-block w-[23px] h-[19px] leading-[19px] rounded font-mono text-[10px] font-semibold',
                                                                         // Sunday reads as a weekly off whatever the row says
                                                                         sunday ? 'bg-line text-ink-3/70'
                                                                                : (s ? cellTone[s] || 'bg-paper-2 text-ink-3' : 'bg-paper-2 text-ink-3'))}
                                                           title={sunday ? 'Sunday — weekly off, paid' : s || 'not marked'}>
-                                                        {sunday ? 'S' : (s ? s[0] : '·')}
+                                                        {sunday ? 'S' : (s ? SHORT[s] || s[0] : '·')}
                                                     </span>
                                                 </td>
                                             );
                                         })}
                                         <td className="px-2 py-1.5 text-right tnum font-semibold">{r.present}</td>
+                                        <td className="px-2 py-1.5 text-right tnum">{r.late || 0}</td>
                                         <td className="px-2 py-1.5 text-right tnum">{r.absent}</td>
                                     </tr>
                                 ))}

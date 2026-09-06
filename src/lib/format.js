@@ -44,6 +44,63 @@ export const currentMonthKey = () => {
 export const monthOptions = (feeMonths = []) =>
     [...feeMonths].sort().reverse().map((m) => ({ value: m, label: monthLabel(m) }));
 
+// ---------------------------------------------------------------------------
+// Academic session helpers.
+//
+// A session is named "2026-27" and runs April to March — India's standard
+// academic year. Everything else about it follows from the name, so the
+// Settings form derives it rather than asking four questions.
+//
+// These match scripts/seedSession.js exactly, on purpose: a session created
+// from the UI must be indistinguishable from a seeded one.
+// ---------------------------------------------------------------------------
+
+// The starting calendar year of "2026-27" -> 2026
+const sessionStartYear = (name) => {
+    const year = Number(String(name || '').slice(0, 4));
+    return Number.isInteger(year) && year > 1900 ? year : null;
+};
+
+// "2026-27" -> the 12 billable months, April 2026 through March 2027.
+export const sessionMonths = (name) => {
+    const startYear = sessionStartYear(name);
+    if (!startYear) return [];
+
+    const out = [];
+    for (let i = 0; i < 12; i += 1) {
+        // April (4) through December (12), then January (1) through March (3)
+        const monthNo = ((3 + i) % 12) + 1;
+        const year = 3 + i < 12 ? startYear : startYear + 1;
+        out.push(`${year}-${String(monthNo).padStart(2, '0')}`);
+    }
+    return out;
+};
+
+// "2026-27" -> 1 Apr 2026 to 31 Mar 2027, as <input type="date"> strings.
+// Built as strings rather than through Date + toISOString(), which shifts a
+// day backwards for every IST date.
+export const sessionDates = (name) => {
+    const startYear = sessionStartYear(name);
+    if (!startYear) return { startDate: '', endDate: '' };
+    return { startDate: `${startYear}-04-01`, endDate: `${startYear + 1}-03-31` };
+};
+
+// Which session today falls in. Before April the academic year still belongs
+// to the previous calendar year, which is the easy thing to get wrong in
+// January.
+export const suggestSessionName = (from = new Date()) => {
+    const d = new Date(from);
+    const startYear = d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1;
+    return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+};
+
+// Regex-valid but nonsense: "2026-30". The second half must be the next year.
+export const isSaneSessionName = (name) => {
+    if (!/^\d{4}-\d{2}$/.test(String(name || ''))) return false;
+    const startYear = sessionStartYear(name);
+    return Number(String(name).slice(5)) === (startYear + 1) % 100;
+};
+
 export const percent = (n) => `${Math.round(Number(n) || 0)}%`;
 
 // A short label for a chart axis. Lakh formatting only when the amount is

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { useDaybook, useOutstanding, useIncomeExpense } from '../hooks/queries';
+import { useDaybook, useOutstanding, useIncomeExpense, useVoidReceipt } from '../hooks/queries';
 import { money, num, date, time, toInputDate, monthLabel } from '../lib/format';
 import {
-    Card, Table, Tr, Td, Button, Input, Toolbar, Spacer, Pill,
+    Card, Table, Tr, Td, Button, Input, Toolbar, Spacer, Pill, ReasonModal,
     Async, PageTitle, Tabs, EmptyState, cx,
 } from '../components/ui';
+import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
 
 // ---------------------------------------------------------------------------
@@ -14,7 +15,10 @@ import { useAuth } from '../store/auth';
 // ---------------------------------------------------------------------------
 function Daybook() {
     const [day, setDay] = useState(toInputDate(new Date()));
+    // The entry being voided. null = the dialog is closed.
+    const [voiding, setVoiding] = useState(null);
     const book = useDaybook(day);
+    const voidReceipt = useVoidReceipt();
 
     return (
         <>
@@ -41,8 +45,8 @@ function Daybook() {
 
                         <Card title={`Day book — ${date(day)}`} hint="for reconciling against the cash box">
                             <Table head={['Time', { label: 'Particulars', primary: true }, 'Type', 'Mode', { label: 'In', align: 'right' },
-                                          { label: 'Out', align: 'right' }]}
-                                   isEmpty={!d.rows.length} empty="No entries on this date" minWidth={640}>
+                                          { label: 'Out', align: 'right' }, '']}
+                                   isEmpty={!d.rows.length} empty="No entries on this date" minWidth={720}>
                                 {d.rows.map((t) => (
                                     <Tr key={t._id} className={t.voided ? 'opacity-50' : ''}>
                                         <Td className="font-mono text-[11.5px] text-ink-3">{time(t.txnDate)}</Td>
@@ -62,6 +66,17 @@ function Daybook() {
                                         <Td align="right" className={t.direction === 'OUT' ? 'text-crit' : ''}>
                                             {t.direction === 'OUT' ? num(t.amount) : '—'}
                                         </Td>
+                                        <Td>
+                                            {/* Reconciling against the cash box is where a wrong entry
+                                                gets spotted, so this is the second place a receipt can
+                                                be voided from. A REVERSAL row is itself the undoing of
+                                                something, so it is never offered. */}
+                                            <Can perm="fee.void">
+                                                {t.type === 'FEE' && !t.voided && (
+                                                    <Button size="sm" variant="danger" onClick={() => setVoiding(t)}>Void</Button>
+                                                )}
+                                            </Can>
+                                        </Td>
                                     </Tr>
                                 ))}
                             </Table>
@@ -69,6 +84,23 @@ function Daybook() {
                     </>
                 )}
             </Async>
+
+            <ReasonModal
+                open={Boolean(voiding)}
+                onClose={() => setVoiding(null)}
+                loading={voidReceipt.isPending}
+                title="Void this receipt?"
+                what={voiding ? `${voiding.receiptNo || 'Receipt'} — ${voiding.party?.name || ''}, ${money(voiding.amount)}` : ''}
+                consequence={
+                    'The entry stays in the day book, marked void, with an opposing line beside it. '
+                    + 'The exact months this receipt paid go back to outstanding.'
+                }
+                confirmLabel="Void receipt"
+                onConfirm={async (reason) => {
+                    await voidReceipt.mutateAsync({ id: voiding._id, reason });
+                    setVoiding(null);
+                }}
+            />
         </>
     );
 }

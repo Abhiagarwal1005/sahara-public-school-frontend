@@ -22,6 +22,7 @@ const Salary = lazy(() => import('./pages/Salary'));
 const Expenses = lazy(() => import('./pages/Expenses'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Activity = lazy(() => import('./pages/Activity'));
 
 const gate = (perm, el) => <RequirePermission perm={perm}>{el}</RequirePermission>;
 
@@ -50,6 +51,11 @@ export default function App() {
                         <Route path="salary" element={gate('salary.view', <Salary />)} />
                         <Route path="expenses" element={gate('expense.view', <Expenses />)} />
                         <Route path="reports" element={gate('report.daybook', <Reports />)} />
+                        {/* Gated on the capability, not on the role — so an Admin who wants the
+                            Principal to see the trail grants it from Settings, with no deploy.
+                            Putting this inside Settings (which IS role-gated) would have made
+                            `audit.view` grantable but unreachable. */}
+                        <Route path="activity" element={gate('audit.view', <Activity />)} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Route>

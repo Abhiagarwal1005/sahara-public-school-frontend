@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     useLeads, useLead, useLeadSummary, useCreateLead, useLogFollowUp, useDeleteLead, useClasses,
+    useUpdateLead,
 } from '../hooks/queries';
 import { date, dateShort, toInputDate } from '../lib/format';
 import {
@@ -159,6 +160,89 @@ function AddLead({ open, onClose }) {
 // the detail view fetches the whole lead — otherwise the note and the address
 // silently render as blank, which reads as "they didn't tell us" rather than
 // "we didn't ask for it".
+// ---------------------------------------------------------------------------
+// Correcting an enquiry's own details.
+//
+// This is NOT the follow-up form — that one records what was said and moves
+// the lead along, and it is append-only for a reason. This is for the plain
+// mistakes: a misheard name, a digit wrong in the phone number, the wrong
+// class written down.
+//
+// `classInterested` stays free text even though the dropdown offers the
+// school's classes, because a parent can ask about a class that does not
+// exist yet ("Nursery next year") — see lead.model.js.
+// ---------------------------------------------------------------------------
+function EditLead({ lead, onClose }) {
+    const classes = useClasses();
+    const update = useUpdateLead();
+    const [form, setForm] = useState(null);
+
+    useEffect(() => {
+        if (!lead) return setForm(null);
+        setForm({
+            name: lead.name || '',
+            guardianName: lead.guardianName || '',
+            phone: lead.phone || '',
+            altPhone: lead.altPhone || '',
+            address: lead.address || '',
+            classInterested: lead.classInterested || '',
+            source: lead.source || 'Walk-in',
+            note: lead.note || '',
+        });
+    }, [lead]);
+
+    if (!lead || !form) return null;
+
+    const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+    const valid = form.name.trim().length >= 2 && /^[6-9]\d{9}$/.test(form.phone);
+
+    const save = async () => {
+        const body = { id: lead._id };
+        for (const key of ['name', 'guardianName', 'phone', 'altPhone', 'address', 'classInterested', 'source', 'note']) {
+            const next = typeof form[key] === 'string' ? form[key].trim() : form[key];
+            if (next !== (lead[key] || '')) body[key] = next;
+        }
+        if (Object.keys(body).length === 1) return onClose();
+        await update.mutateAsync(body);
+        onClose();
+    };
+
+    return (
+        <Modal open onClose={onClose} title={`Edit ${lead.name}`} wide
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={update.isPending} disabled={!valid} onClick={save}>Save</Button>
+               </>}>
+            <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Child's name" required><Input value={form.name} autoFocus onChange={set('name')} /></Field>
+                <Field label="Parent / guardian"><Input value={form.guardianName} onChange={set('guardianName')} /></Field>
+                <Field label="Phone" required error={form.phone && !/^[6-9]\d{9}$/.test(form.phone) ? 'Enter a valid 10-digit mobile number' : undefined}>
+                    <Input inputMode="numeric" maxLength={10} value={form.phone} onChange={set('phone')} />
+                </Field>
+                <Field label="Alternate phone"><Input inputMode="numeric" maxLength={10} value={form.altPhone} onChange={set('altPhone')} /></Field>
+                <Field label="Class interested in" hint="free text — a class that does not exist yet is fine">
+                    <Input list="lead-classes" value={form.classInterested} onChange={set('classInterested')} />
+                </Field>
+                <datalist id="lead-classes">
+                    {classes.data?.map((c) => <option key={c._id} value={`${c.name} – ${c.section}`} />)}
+                </datalist>
+                <Field label="Source">
+                    <Select value={form.source} onChange={set('source')}>
+                        {['Walk-in', 'Phone', 'Reference', 'Online', 'Other'].map((x) => <option key={x}>{x}</option>)}
+                    </Select>
+                </Field>
+                <Field label="Address" className="sm:col-span-2"><Input value={form.address} onChange={set('address')} /></Field>
+                <Field label="Note" className="sm:col-span-2"><Textarea value={form.note} onChange={set('note')} /></Field>
+            </div>
+
+            <p className="mt-3 text-[11.5px] text-ink-3">
+                This corrects the enquiry's own details. To record a call and move the lead along,
+                use the follow-up form — that history is never edited.
+            </p>
+        </Modal>
+    );
+}
+
 function LeadDetail({ lead: row, onClose }) {
     const full = useLead(row._id);
     const lead = full.data || row;
@@ -167,6 +251,7 @@ function LeadDetail({ lead: row, onClose }) {
     const [outcome, setOutcome] = useState(row.status === 'New' ? 'Contacted' : row.status);
     const [next, setNext] = useState(toInputDate(new Date(Date.now() + 3 * 86400000)));
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [editing, setEditing] = useState(false);
 
     const log = useLogFollowUp(onClose);
     const remove = useDeleteLead(onClose);
@@ -189,6 +274,9 @@ function LeadDetail({ lead: row, onClose }) {
         <Modal open onClose={onClose} title={lead.name} wide
                footer={<>
                    <Button onClick={onClose}>Close</Button>
+                   <Can perm="lead.manage">
+                       <Button onClick={() => setEditing(true)}>Edit details</Button>
+                   </Can>
                    <Can perm="lead.manage">
                        {confirmDelete ? (
                            <Button variant="danger" loading={remove.isPending}
@@ -293,6 +381,8 @@ function LeadDetail({ lead: row, onClose }) {
                     </Can>
                 </div>
             </div>
+
+            {editing && <EditLead lead={lead} onClose={() => setEditing(false)} />}
         </Modal>
     );
 }

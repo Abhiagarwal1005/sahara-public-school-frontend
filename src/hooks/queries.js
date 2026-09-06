@@ -40,23 +40,31 @@ export const useClasses = () =>
     useQuery({ queryKey: ['classes'], queryFn: () => get('/classes'), staleTime: 5 * 60_000 });
 
 export const useCreateClass = () =>
-    useAction((body) => post('/classes', body), { invalidate: [['classes']], success: 'Class created' });
+    useAction((body) => post('/classes', body), { invalidate: [['classes'], ['audit']], success: 'Class created' });
 
 export const useUpdateClass = () =>
-    useAction(({ id, ...body }) => patch(`/classes/${id}`, body), { invalidate: [['classes']], success: 'Class updated' });
+    useAction(({ id, ...body }) => patch(`/classes/${id}`, body), { invalidate: [['classes'], ['audit']], success: 'Class updated' });
 
-export const useCreateSession = () =>
-    useAction((body) => post('/sessions', body), { invalidate: [['sessions']], success: 'Session created' });
+// onDone receives the created session, so the caller can activate it straight
+// away — the first session has to become active or the whole app answers 409.
+export const useCreateSession = (onDone) =>
+    useAction((body) => post('/sessions', body), {
+        invalidate: [['sessions'], ['audit']],
+        success: 'Session created',
+        onDone,
+    });
 
 export const useActivateSession = () =>
-    useAction((id) => post(`/sessions/${id}/activate`), { invalidate: [['sessions'], ['session']], success: 'Session activated' });
+    useAction((id) => post(`/sessions/${id}/activate`), {
+        // ['session'] is the active-session query every screen reads; without
+        // it the app keeps using the old session until that cache expires.
+        invalidate: [['sessions'], ['session'], ['classes'], ['audit']],
+        success: 'Session activated',
+    });
 
 // ---- students ----
 export const useStudents = (params) =>
     useQuery({ queryKey: ['students', params], queryFn: () => get('/students', params), placeholderData: (p) => p });
-
-export const useStudent = (id) =>
-    useQuery({ queryKey: ['student', id], queryFn: () => get(`/students/${id}`), enabled: Boolean(id) });
 
 export const useStudentLedger = (id) =>
     useQuery({ queryKey: ['student', id, 'ledger'], queryFn: () => get(`/students/${id}/ledger`), enabled: Boolean(id) });
@@ -65,13 +73,13 @@ export const useDefaulters = (params) =>
     useQuery({ queryKey: ['defaulters', params], queryFn: () => get('/students/defaulters', params) });
 
 export const useCreateStudent = () =>
-    useAction((body) => post('/students', body), { invalidate: [['students'], ['classes']], success: 'Student added' });
+    useAction((body) => post('/students', body), { invalidate: [['students'], ['classes'], ['audit']], success: 'Student added' });
 
 export const useUpdateStudent = () =>
-    useAction(({ id, ...body }) => patch(`/students/${id}`, body), { invalidate: [['students'], ['student'], ['classes']], success: 'Student updated' });
+    useAction(({ id, ...body }) => patch(`/students/${id}`, body), { invalidate: [['students'], ['student'], ['classes'], ['audit']], success: 'Student updated' });
 
 export const useMarkLeft = () =>
-    useAction((id) => del(`/students/${id}`), { invalidate: [['students'], ['student'], ['classes']], success: 'Student marked as Left' });
+    useAction((id) => del(`/students/${id}`), { invalidate: [['students'], ['student'], ['classes'], ['audit']], success: 'Student marked as Left' });
 
 // ---- fees ----
 export const useFeeDemands = (params) =>
@@ -85,26 +93,26 @@ export const useFeeSummary = (month) =>
 
 export const useGenerateFees = () =>
     useAction((body) => post('/fees/generate', body), {
-        invalidate: [['fees'], ['students'], ['dashboard'], ['reports']],
+        invalidate: [['fees'], ['students'], ['dashboard'], ['reports'], ['audit']],
         success: (d) => (d.created ? `${d.created} fee demands raised (₹${d.totalRaised})` : d.message || 'All fees were already raised'),
     });
 
 export const useCollectFee = (onDone) =>
     useAction((body) => post('/fees/collect', body), {
-        invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['reports'], ['defaulters']],
+        invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['reports'], ['defaulters'], ['audit']],
         success: (d) => `${d.receiptNo} — ₹${d.amount} collected`,
         onDone,
     });
 
 export const useDiscount = () =>
     useAction(({ id, ...body }) => post(`/fees/demands/${id}/discount`, body), {
-        invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['defaulters']],
+        invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['defaulters'], ['audit']],
         success: 'Discount applied',
     });
 
 export const useVoidReceipt = () =>
     useAction(({ id, reason }) => post(`/fees/receipts/${id}/void`, { reason }), {
-        invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['reports']],
+        invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['reports'], ['audit']],
         success: 'Receipt voided',
     });
 
@@ -122,27 +130,27 @@ export const useLead = (id) =>
 
 export const useCreateLead = (onDone) =>
     useAction((body) => post('/leads', body), {
-        invalidate: [['leads']],
+        invalidate: [['leads'], ['audit']],
         success: 'Enquiry saved',
         onDone,
     });
 
 export const useUpdateLead = () =>
     useAction(({ id, ...body }) => patch(`/leads/${id}`, body), {
-        invalidate: [['leads']],
+        invalidate: [['leads'], ['audit']],
         success: 'Lead updated',
     });
 
 export const useLogFollowUp = (onDone) =>
     useAction(({ id, ...body }) => post(`/leads/${id}/follow-up`, body), {
-        invalidate: [['leads']],
+        invalidate: [['leads'], ['audit']],
         success: 'Follow-up saved',
         onDone,
     });
 
 export const useDeleteLead = (onDone) =>
     useAction((id) => del(`/leads/${id}`), {
-        invalidate: [['leads']],
+        invalidate: [['leads'], ['audit']],
         success: 'Lead deleted',
         onDone,
     });
@@ -151,22 +159,19 @@ export const useDeleteLead = (onDone) =>
 export const useStockItems = (params) =>
     useQuery({ queryKey: ['stock', 'items', params], queryFn: () => get('/stock/items', params) });
 
-export const useStockItem = (id) =>
-    useQuery({ queryKey: ['stock', 'item', id], queryFn: () => get(`/stock/items/${id}`), enabled: Boolean(id) });
-
 export const useLowStock = () => useQuery({ queryKey: ['stock', 'low'], queryFn: () => get('/stock/low') });
 
 export const useMovements = (id, params) =>
     useQuery({ queryKey: ['stock', 'movements', id, params], queryFn: () => get(`/stock/items/${id}/movements`, params), enabled: Boolean(id) });
 
 export const useCreateItem = () =>
-    useAction((body) => post('/stock/items', body), { invalidate: [['stock']], success: 'Item added' });
+    useAction((body) => post('/stock/items', body), { invalidate: [['stock'], ['audit']], success: 'Item added' });
 
 export const useUpdateItem = () =>
-    useAction(({ id, ...body }) => patch(`/stock/items/${id}`, body), { invalidate: [['stock']], success: 'Item updated' });
+    useAction(({ id, ...body }) => patch(`/stock/items/${id}`, body), { invalidate: [['stock'], ['audit']], success: 'Item updated' });
 
 export const useAdjustStock = () =>
-    useAction((body) => post('/stock/adjust', body), { invalidate: [['stock']], success: 'Stock adjusted' });
+    useAction((body) => post('/stock/adjust', body), { invalidate: [['stock'], ['audit']], success: 'Stock adjusted' });
 
 // ---- sales ----
 export const useSales = (params) =>
@@ -174,7 +179,7 @@ export const useSales = (params) =>
 
 export const useCreateSale = (onDone) =>
     useAction((body) => post('/sales', body), {
-        invalidate: [['sales'], ['stock'], ['students'], ['student'], ['dashboard'], ['reports']],
+        invalidate: [['sales'], ['stock'], ['students'], ['student'], ['dashboard'], ['reports'], ['audit']],
         success: (d) => `Bill ${d.billNo} created`,
         onDone,
     });
@@ -190,14 +195,14 @@ export const useStockDues = (studentId) =>
 
 export const useCollectStockDues = (onDone) =>
     useAction((body) => post('/sales/collect', body), {
-        invalidate: [['sales'], ['students'], ['student'], ['dashboard'], ['reports'], ['defaulters']],
+        invalidate: [['sales'], ['students'], ['student'], ['dashboard'], ['reports'], ['defaulters'], ['audit']],
         success: (d) => `${d.receiptNo} — ₹${d.amount} received`,
         onDone,
     });
 
 export const useVoidSale = () =>
     useAction(({ id, reason }) => post(`/sales/${id}/void`, { reason }), {
-        invalidate: [['sales'], ['stock'], ['students'], ['dashboard']],
+        invalidate: [['sales'], ['stock'], ['students'], ['dashboard'], ['audit']],
         success: 'Bill voided',
     });
 
@@ -211,11 +216,11 @@ export const useVendorStatement = (id) =>
 export const useAgeing = () => useQuery({ queryKey: ['vendors', 'ageing'], queryFn: () => get('/vendors/ageing') });
 
 export const useCreateVendor = () =>
-    useAction((body) => post('/vendors', body), { invalidate: [['vendors']], success: 'Vendor added' });
+    useAction((body) => post('/vendors', body), { invalidate: [['vendors'], ['audit']], success: 'Vendor added' });
 
 export const usePayVendor = (onDone) =>
     useAction((body) => post('/vendors/pay', body), {
-        invalidate: [['vendors'], ['purchases'], ['dashboard'], ['reports']],
+        invalidate: [['vendors'], ['purchases'], ['dashboard'], ['reports'], ['audit']],
         success: 'Payment recorded',
         onDone,
     });
@@ -225,7 +230,7 @@ export const usePurchases = (params) =>
 
 export const useCreatePurchase = (onDone) =>
     useAction((body) => post('/purchases', body), {
-        invalidate: [['purchases'], ['vendors'], ['stock'], ['dashboard'], ['reports']],
+        invalidate: [['purchases'], ['vendors'], ['stock'], ['dashboard'], ['reports'], ['audit']],
         success: (d) => `Bill ${d.billNo} recorded`,
         onDone,
     });
@@ -235,10 +240,10 @@ export const useTeachers = (params) =>
     useQuery({ queryKey: ['teachers', params], queryFn: () => get('/teachers', params) });
 
 export const useCreateTeacher = () =>
-    useAction((body) => post('/teachers', body), { invalidate: [['teachers']], success: 'Teacher added' });
+    useAction((body) => post('/teachers', body), { invalidate: [['teachers'], ['audit']], success: 'Teacher added' });
 
 export const useUpdateTeacher = () =>
-    useAction(({ id, ...body }) => patch(`/teachers/${id}`, body), { invalidate: [['teachers']], success: 'Teacher updated' });
+    useAction(({ id, ...body }) => patch(`/teachers/${id}`, body), { invalidate: [['teachers'], ['audit']], success: 'Teacher updated' });
 
 export const useTeacherSheet = (date) =>
     useQuery({ queryKey: ['attendance', 'teachers', date], queryFn: () => get('/attendance/teachers', { date }) });
@@ -248,7 +253,7 @@ export const useTeacherGrid = (month) =>
 
 export const useMarkTeachers = () =>
     useAction((body) => post('/attendance/teachers', body), {
-        invalidate: [['attendance']],
+        invalidate: [['attendance'], ['audit']],
         success: (d) => d.warning || 'Attendance saved',
     });
 
@@ -259,7 +264,7 @@ export const useClassMonthly = (month) =>
     useQuery({ queryKey: ['attendance', 'classes', 'monthly', month], queryFn: () => get('/attendance/classes/monthly', { month }), enabled: Boolean(month) });
 
 export const useMarkClasses = () =>
-    useAction((body) => post('/attendance/classes', body), { invalidate: [['attendance']], success: 'Attendance saved' });
+    useAction((body) => post('/attendance/classes', body), { invalidate: [['attendance'], ['audit']], success: 'Attendance saved' });
 
 // ---- salary ----
 export const useSlips = (params) =>
@@ -273,37 +278,37 @@ export const useSlip = (id) =>
 
 export const useGenerateSalary = () =>
     useAction((body) => post('/salary/generate', body), {
-        invalidate: [['salary']],
+        invalidate: [['salary'], ['audit']],
         success: (d) => d.warning || `${d.created} slips created`,
     });
 
 export const useUpdateSlip = () =>
-    useAction(({ id, ...body }) => patch(`/salary/slips/${id}`, body), { invalidate: [['salary']], success: 'Slip updated' });
+    useAction(({ id, ...body }) => patch(`/salary/slips/${id}`, body), { invalidate: [['salary'], ['audit']], success: 'Slip updated' });
 
 export const useAddAdjustment = () =>
     useAction(({ id, ...body }) => post(`/salary/slips/${id}/adjustment`, body), {
-        invalidate: [['salary']],
+        invalidate: [['salary'], ['audit']],
         success: (_d, v) => `${v.kind === 'Add' ? 'Added' : 'Deducted'} ₹${v.amount} — ${v.label}`,
     });
 
 export const useRemoveAdjustment = () =>
     useAction(({ id, adjustmentId }) => del(`/salary/slips/${id}/adjustment/${adjustmentId}`), {
-        invalidate: [['salary']],
+        invalidate: [['salary'], ['audit']],
         success: 'Line removed',
     });
 
 export const useDiscardSlip = () =>
     useAction((id) => del(`/salary/slips/${id}`), {
-        invalidate: [['salary']],
+        invalidate: [['salary'], ['audit']],
         success: 'Draft discarded — press Generate to rebuild it',
     });
 
 export const useApproveSlip = () =>
-    useAction((id) => post(`/salary/slips/${id}/approve`), { invalidate: [['salary']], success: 'Slip approved — it is now frozen' });
+    useAction((id) => post(`/salary/slips/${id}/approve`), { invalidate: [['salary'], ['audit']], success: 'Slip approved — it is now frozen' });
 
 export const usePaySlip = () =>
     useAction(({ id, ...body }) => post(`/salary/slips/${id}/pay`, body), {
-        invalidate: [['salary'], ['dashboard'], ['reports']],
+        invalidate: [['salary'], ['dashboard'], ['reports'], ['audit']],
         success: 'Salary paid',
     });
 
@@ -319,19 +324,19 @@ export const useExpenseByCategory = (month) =>
 
 export const useCreateExpense = (onDone) =>
     useAction((body) => post('/expenses', body), {
-        invalidate: [['expenses'], ['dashboard'], ['reports']],
+        invalidate: [['expenses'], ['dashboard'], ['reports'], ['audit']],
         success: 'Expense recorded',
         onDone,
     });
 
 export const useDeleteExpense = () =>
     useAction(({ id, reason }) => del(`/expenses/${id}`, { reason }), {
-        invalidate: [['expenses'], ['dashboard'], ['reports']],
+        invalidate: [['expenses'], ['dashboard'], ['reports'], ['audit']],
         success: 'Expense deleted',
     });
 
 export const useCreateCategory = () =>
-    useAction((body) => post('/expenses/categories', body), { invalidate: [['expenses', 'categories']], success: 'Category created' });
+    useAction((body) => post('/expenses/categories', body), { invalidate: [['expenses', 'categories'], ['audit']], success: 'Category created' });
 
 // ---- reports ----
 export const useDashboard = () => useQuery({ queryKey: ['dashboard'], queryFn: () => get('/reports/dashboard') });
@@ -340,14 +345,29 @@ export const useOutstanding = () => useQuery({ queryKey: ['reports', 'outstandin
 export const useIncomeExpense = () => useQuery({ queryKey: ['reports', 'income'], queryFn: () => get('/reports/income-expense') });
 export const useFeeTrend = () => useQuery({ queryKey: ['reports', 'trend'], queryFn: () => get('/reports/fee-trend') });
 
+// ---- edit history ----
+// Who changed what. The backend gates this on `audit.view`, which only Admin
+// holds by default — but it is grantable, so this is a normal query, not an
+// Admin-only special case.
+export const useAudit = (params) =>
+    useQuery({ queryKey: ['audit', params], queryFn: () => get('/audit', params), placeholderData: (p) => p });
+
+// One record's own trail — the panel on a student, teacher or item.
+export const useEntityHistory = (entity, id) =>
+    useQuery({
+        queryKey: ['audit', entity, id],
+        queryFn: () => get(`/audit/${entity}/${id}`),
+        enabled: Boolean(entity && id),
+    });
+
 // ---- users & permissions (Admin) ----
 export const useUsers = () => useQuery({ queryKey: ['users'], queryFn: () => get('/users') });
 
 export const useCreateUser = (onDone) =>
-    useAction((body) => post('/users', body), { invalidate: [['users']], success: 'User created', onDone });
+    useAction((body) => post('/users', body), { invalidate: [['users'], ['audit']], success: 'User created', onDone });
 
 export const useUpdateUser = () =>
-    useAction(({ id, ...body }) => patch(`/users/${id}`, body), { invalidate: [['users']], success: 'User updated' });
+    useAction(({ id, ...body }) => patch(`/users/${id}`, body), { invalidate: [['users'], ['audit']], success: 'User updated' });
 
 export const useResetPassword = (onDone) =>
     useAction((id) => post(`/users/${id}/reset-password`), { success: 'New temporary password generated', onDone });
@@ -356,6 +376,6 @@ export const usePermissions = () => useQuery({ queryKey: ['permissions'], queryF
 
 export const useUpdatePermissions = () =>
     useAction(({ role, permissions }) => patch(`/permissions/${role}`, { permissions }), {
-        invalidate: [['permissions']],
+        invalidate: [['permissions'], ['audit']],
         success: 'Permissions updated — effective immediately',
     });

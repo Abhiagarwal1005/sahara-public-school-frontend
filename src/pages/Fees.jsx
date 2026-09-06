@@ -7,7 +7,7 @@ import {
 } from '../hooks/queries';
 import { money, num, monthLabel, currentMonthKey, monthOptions, percent, dateShort } from '../lib/format';
 import {
-    Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal, Meter,
+    Card, Table, Tr, Td, Button, Input, Select, Field, Textarea, Toolbar, Spacer, Modal, Meter,
     Async, PageTitle, Tabs, Pill, statusPill, EmptyState, Loading, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
@@ -345,9 +345,80 @@ function StudentPicker({ onPick, picked }) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Giving a discount or a waiver.
+//
+// `fee.discount` has been in the permission catalogue from the start, and the
+// Settings screen has always shown a switch for it — but nothing in the app
+// could actually give one, so the switch controlled nothing.
+//
+// A discount is NOT a payment: no cash moved, so no receipt and no ledger row.
+// It lowers the student's outstanding and rises under its own head in the
+// rollup, which is what keeps "expected vs collected vs waived" three separate
+// numbers on the class-wise report instead of a discount hiding inside
+// collections.
+// ---------------------------------------------------------------------------
+function DiscountModal({ demand, onClose }) {
+    const discount = useDiscount();
+    const [amount, setAmount] = useState('');
+    const [reason, setReason] = useState('');
+
+    if (!demand) return null;
+
+    const due = Math.max(0, demand.amount - demand.discount - demand.paidAmount);
+    const value = Number(String(amount).replace(/,/g, '')) || 0;
+    const valid = value > 0 && value <= due && reason.trim().length >= 3;
+
+    return (
+        <Modal open onClose={onClose} title={`Discount — ${demand.studentName}`}
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={discount.isPending} disabled={!valid}
+                           onClick={async () => {
+                               await discount.mutateAsync({ id: demand._id, amount: value, reason: reason.trim() });
+                               onClose();
+                           }}>
+                       Apply discount
+                   </Button>
+               </>}>
+            <div className="flex flex-col gap-3">
+                <div className="flex items-baseline justify-between pb-3 border-b border-line">
+                    <span className="text-[12px] text-ink-3">{monthLabel(demand.month)} · outstanding</span>
+                    <span className="text-[20px] font-semibold tnum text-crit">{money(due)}</span>
+                </div>
+
+                <Field label="Discount amount" required
+                       error={value > due ? `Only ${money(due)} is outstanding on this month` : undefined}>
+                    <Input inputMode="numeric" value={amount} autoFocus placeholder={String(due)}
+                           onChange={(e) => setAmount(e.target.value)} />
+                </Field>
+
+                <Button size="sm" className="w-max" onClick={() => setAmount(String(due))}>
+                    Waive the whole {money(due)}
+                </Button>
+
+                <Field label="Reason" required
+                       hint="Recorded against your name — this is the first thing a trust or an auditor asks about">
+                    <Textarea value={reason} placeholder="Sibling concession, staff child, hardship…"
+                              onChange={(e) => setReason(e.target.value)} />
+                </Field>
+
+                {value > 0 && value <= due && (
+                    <div className="bg-paper-2 border border-line rounded-md px-3 py-2.5 text-[12.5px] text-ink-2">
+                        No money changes hands and no receipt is issued.
+                        {' '}<b className="text-ink">{money(due - value)}</b> stays outstanding for {monthLabel(demand.month)}.
+                    </div>
+                )}
+            </div>
+        </Modal>
+    );
+}
+
 // ---- month view ----
 function MonthView({ month }) {
     const [cls, setCls] = useState('');
+    // The demand a discount is being given on. null = the dialog is closed.
+    const [discounting, setDiscounting] = useState(null);
     const classes = useClasses();
     const demands = useFeeDemands({ month, class: cls || undefined, limit: 100 });
     const generate = useGenerateFees();
@@ -373,10 +444,10 @@ function MonthView({ month }) {
                     {(d) => (
                         <Table
                             head={['Student', 'Class', { label: 'Fee', align: 'right' }, { label: 'Discount', align: 'right' },
-                                   { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, 'Status']}
+                                   { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, 'Status', '']}
                             isEmpty={!d.items.length}
                             empty="Fees for this month have not been raised yet — use the button above"
-                            minWidth={720}
+                            minWidth={800}
                         >
                             {d.items.map((f) => {
                                 const due = Math.max(0, f.amount - f.discount - f.paidAmount);
@@ -393,6 +464,13 @@ function MonthView({ month }) {
                                         <Td align="right">{money(f.paidAmount)}</Td>
                                         <Td align="right" className={due > 0 ? 'text-crit font-semibold' : ''}>{money(due)}</Td>
                                         <Td>{statusPill(f.status)}</Td>
+                                        <Td>
+                                            <Can perm="fee.discount">
+                                                {due > 0 && (
+                                                    <Button size="sm" onClick={() => setDiscounting(f)}>Discount</Button>
+                                                )}
+                                            </Can>
+                                        </Td>
                                     </Tr>
                                 );
                             })}
@@ -400,6 +478,8 @@ function MonthView({ month }) {
                     )}
                 </Async>
             </Card>
+
+            <DiscountModal demand={discounting} onClose={() => setDiscounting(null)} />
         </>
     );
 }

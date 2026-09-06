@@ -1,21 +1,120 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useStudentLedger, useMarkLeft } from '../hooks/queries';
-import { money, date, monthLabel } from '../lib/format';
 import {
-    Card, Table, Tr, Td, Button, Async, PageTitle, Pill, statusPill, Modal, EmptyState,
+    useStudentLedger, useMarkLeft, useUpdateStudent, useVoidReceipt, useClasses, useEntityHistory,
+} from '../hooks/queries';
+import { money, date, time, monthLabel } from '../lib/format';
+import {
+    Card, Table, Tr, Td, Button, Input, Select, Field, Async, PageTitle, Pill, statusPill,
+    Modal, ReasonModal, EmptyState,
 } from '../components/ui';
+import { HistoryCard } from '../components/History';
 import { Can } from '../components/Can';
 import { CollectFeePanel, CollectStockDuesPanel } from './Fees';
+
+// ---------------------------------------------------------------------------
+// Editing a student.
+//
+// The backend has always accepted this (PATCH /students/:id, `student.edit`)
+// and the permission has always been in the catalogue — there was simply no
+// way to reach it. Meanwhile the three things an office actually changes —
+// the class at promotion, a concession on the fee, a corrected phone number —
+// could not be done at all.
+//
+// Changing the class is the delicate one: the service moves both class counts
+// and rewrites the unpaid demands, so it is a normal edit here but a
+// transaction there.
+// ---------------------------------------------------------------------------
+function EditStudent({ student, open, onClose }) {
+    const classes = useClasses();
+    const update = useUpdateStudent();
+    const [form, setForm] = useState(null);
+
+    // Re-seed from the student each time it opens, so a cancelled edit is
+    // genuinely cancelled rather than lingering in state.
+    useEffect(() => {
+        if (!open) return;
+        setForm({
+            name: student.name || '',
+            guardianName: student.guardianName || '',
+            phone: student.phone || '',
+            altPhone: student.altPhone || '',
+            address: student.address || '',
+            class: String(student.class?._id || student.class || ''),
+            monthlyFee: String(student.monthlyFee ?? ''),
+        });
+    }, [open, student]);
+
+    if (!open || !form) return null;
+
+    const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+    const classChanged = form.class !== String(student.class?._id || student.class || '');
+    const valid = form.name.trim().length >= 2 && /^[6-9]\d{9}$/.test(form.phone) && Number(form.monthlyFee) >= 0;
+
+    const save = async () => {
+        // Only what actually changed — the history records fields that moved,
+        // and sending everything would make a no-op save look like an edit.
+        const body = { id: student._id };
+        if (form.name.trim() !== student.name) body.name = form.name.trim();
+        if (form.guardianName.trim() !== (student.guardianName || '')) body.guardianName = form.guardianName.trim();
+        if (form.phone !== student.phone) body.phone = form.phone;
+        if (form.altPhone !== (student.altPhone || '')) body.altPhone = form.altPhone;
+        if (form.address.trim() !== (student.address || '')) body.address = form.address.trim();
+        if (classChanged) body.class = form.class;
+        if (Number(form.monthlyFee) !== student.monthlyFee) body.monthlyFee = Number(form.monthlyFee);
+
+        if (Object.keys(body).length === 1) return onClose(); // nothing moved
+        await update.mutateAsync(body);
+        onClose();
+    };
+
+    return (
+        <Modal open={open} onClose={onClose} title={`Edit ${student.name}`} wide
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={update.isPending} disabled={!valid} onClick={save}>Save</Button>
+               </>}>
+            <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Name" required><Input value={form.name} onChange={set('name')} /></Field>
+                <Field label="Guardian"><Input value={form.guardianName} onChange={set('guardianName')} /></Field>
+                <Field label="Phone" required error={form.phone && !/^[6-9]\d{9}$/.test(form.phone) ? 'Enter a valid 10-digit mobile number' : undefined}>
+                    <Input inputMode="numeric" maxLength={10} value={form.phone} onChange={set('phone')} />
+                </Field>
+                <Field label="Alternate phone"><Input inputMode="numeric" maxLength={10} value={form.altPhone} onChange={set('altPhone')} /></Field>
+                <Field label="Class">
+                    <Select value={form.class} onChange={set('class')}>
+                        {classes.data?.map((c) => <option key={c._id} value={c._id}>{c.name} – {c.section}</option>)}
+                    </Select>
+                </Field>
+                <Field label="Monthly fee" hint="Overrides the class default — sibling concessions, staff children">
+                    <Input inputMode="numeric" value={form.monthlyFee} onChange={set('monthlyFee')} />
+                </Field>
+                <Field label="Address" className="sm:col-span-2"><Input value={form.address} onChange={set('address')} /></Field>
+            </div>
+
+            {classChanged && (
+                <div className="mt-3 bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px]">
+                    Moving class also moves this student's <b>unpaid</b> fee months to the new class.
+                    Receipts already issued stay filed under the old one, so last month's class-wise
+                    report does not change.
+                </div>
+            )}
+        </Modal>
+    );
+}
 
 export default function StudentProfile() {
     const { id } = useParams();
     const navigate = useNavigate();
     const ledger = useStudentLedger(id);
     const markLeft = useMarkLeft();
+    const voidReceipt = useVoidReceipt();
     const [leaving, setLeaving] = useState(false);
+    const [editing, setEditing] = useState(false);
     const [collecting, setCollecting] = useState(false);
     const [collectingDues, setCollectingDues] = useState(false);
+    // The receipt being voided. null = the dialog is closed.
+    const [voiding, setVoiding] = useState(null);
 
     return (
         <Async query={ledger}>
@@ -32,6 +131,11 @@ export default function StudentProfile() {
                             )}
                             {summary.stockOutstanding > 0 && (
                                 <Button onClick={() => setCollectingDues(true)}>Collect stock dues</Button>
+                            )}
+                        </Can>
+                        <Can perm="student.edit">
+                            {student.status === 'Active' && (
+                                <Button onClick={() => setEditing(true)}>Edit</Button>
                             )}
                         </Can>
                         <Can perm="student.delete">
@@ -88,10 +192,13 @@ export default function StudentProfile() {
                             </Table>
                         </Card>
 
+                        {/* This is where a bounced cheque gets undone. The backend route and
+                            the `fee.void` permission both existed from the start; there was
+                            simply no button, so the only way in was the API by hand. */}
                         <Card title="Receipts & payments" hint={`${payments.length} entries`}>
                             <Table
-                                head={['Date', 'Type', { label: 'Amount', align: 'right' }, 'Mode', 'Receipt']}
-                                isEmpty={!payments.length} empty="No payments yet" minWidth={460}
+                                head={['Date', 'Type', { label: 'Amount', align: 'right' }, 'Mode', 'Receipt', '']}
+                                isEmpty={!payments.length} empty="No payments yet" minWidth={520}
                             >
                                 {payments.map((p) => (
                                     <Tr key={p._id}>
@@ -102,6 +209,16 @@ export default function StudentProfile() {
                                         </Td>
                                         <Td>{p.mode}</Td>
                                         <Td className="font-mono text-[11.5px]">{p.receiptNo || '—'}</Td>
+                                        <Td>
+                                            {/* Only a fee receipt can be voided from here — a stock receipt
+                                                belongs to its bill, and a reversal row is already the
+                                                undoing of something. */}
+                                            <Can perm="fee.void">
+                                                {p.type === 'FEE' && !p.voided && (
+                                                    <Button size="sm" variant="danger" onClick={() => setVoiding(p)}>Void</Button>
+                                                )}
+                                            </Can>
+                                        </Td>
                                     </Tr>
                                 ))}
                             </Table>
@@ -128,6 +245,29 @@ export default function StudentProfile() {
                             ))}
                         </Table>
                     </Card>
+
+                    {/* Who changed this student, and to what. Renders nothing for a
+                        viewer without `audit.view`. */}
+                    <HistoryCard entity="Student" id={id} />
+
+                    <EditStudent student={student} open={editing} onClose={() => setEditing(false)} />
+
+                    <ReasonModal
+                        open={Boolean(voiding)}
+                        onClose={() => setVoiding(null)}
+                        loading={voidReceipt.isPending}
+                        title="Void this receipt?"
+                        what={voiding ? `${voiding.receiptNo || 'Receipt'} — ${money(voiding.amount)} on ${date(voiding.txnDate)}` : ''}
+                        consequence={
+                            "The receipt is never deleted. It is marked void, an opposing entry is written into the "
+                            + "day book, and the exact months this receipt paid go back to outstanding."
+                        }
+                        confirmLabel="Void receipt"
+                        onConfirm={async (reason) => {
+                            await voidReceipt.mutateAsync({ id: voiding._id, reason });
+                            setVoiding(null);
+                        }}
+                    />
 
                     <Modal
                         open={leaving} onClose={() => setLeaving(false)} title="Mark as left?"

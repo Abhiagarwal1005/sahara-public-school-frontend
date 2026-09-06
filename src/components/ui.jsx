@@ -1,4 +1,4 @@
-import { Children, cloneElement, forwardRef, isValidElement } from 'react';
+import { Children, cloneElement, forwardRef, isValidElement, useEffect, useState } from 'react';
 
 const cx = (...c) => c.filter(Boolean).join(' ');
 
@@ -293,6 +293,62 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
                 {footer && <footer className="sticky bottom-0 flex justify-end gap-2 px-4 py-3 border-t border-line bg-paper-2">{footer}</footer>}
             </div>
         </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Void / delete, with a reason.
+//
+// Every destructive action in this app demands a reason — the backend returns
+// 400 without one, because a void that nobody has to explain is how a cash
+// book stops being a cash book. Rather than each screen inventing its own
+// confirm dialog, they all use this one: same wording shape, same mandatory
+// field, same minimum length as the server's validator (3 characters).
+//
+// It is deliberately NOT a plain window.confirm — the reason has to be typed,
+// and the consequence has to be stated before it is.
+// ---------------------------------------------------------------------------
+export function ReasonModal({ open, onClose, onConfirm, title, what, consequence, confirmLabel = 'Confirm', loading }) {
+    const [reason, setReason] = useState('');
+
+    // Clear the box each time it opens, so last time's reason is never
+    // submitted against this time's record.
+    useEffect(() => { if (open) setReason(''); }, [open]);
+
+    if (!open) return null;
+    const valid = reason.trim().length >= 3;
+
+    return (
+        <Modal
+            open={open}
+            onClose={onClose}
+            title={title}
+            footer={
+                <>
+                    <Button onClick={onClose}>Cancel</Button>
+                    <Button variant="danger" loading={loading} disabled={!valid}
+                            onClick={() => onConfirm(reason.trim())}>
+                        {confirmLabel}
+                    </Button>
+                </>
+            }
+        >
+            <div className="flex flex-col gap-3">
+                {what && <p className="text-[13px] font-semibold">{what}</p>}
+                {consequence && (
+                    <div className="bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px]">
+                        {consequence}
+                    </div>
+                )}
+                <Field label="Reason" required hint="This is recorded against your name and cannot be edited afterwards">
+                    <Textarea value={reason} autoFocus placeholder="Why is this being done?"
+                              onChange={(e) => setReason(e.target.value)} />
+                </Field>
+                {reason.length > 0 && !valid && (
+                    <span className="text-[11.5px] text-crit">Write at least a few words</span>
+                )}
+            </div>
+        </Modal>
     );
 }
 

@@ -4,3 +4,7 @@ dist/
 .env.local
 .vercel
 .DS_Store
+
+# Stale local copies — the API URL lives in deploy.config.js, not here.
+.env.bak
+.env.*.local
