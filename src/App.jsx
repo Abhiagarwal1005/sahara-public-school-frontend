@@ -6,8 +6,8 @@ import { RequireAuth, RequirePermission } from './components/Can';
 import { Toasts } from './components/Toast';
 import { Loading } from './components/ui';
 
-// Route-level code splitting - Accountant kabhi salary ka bundle download
-// download the salary bundle, and the first paint stays small.
+// Route-level code splitting — an Accountant never downloads the salary
+// bundle, and the first paint stays small.
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Students = lazy(() => import('./pages/Students'));

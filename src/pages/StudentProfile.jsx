@@ -9,6 +9,7 @@ import {
     Modal, ReasonModal, EmptyState,
 } from '../components/ui';
 import { HistoryCard } from '../components/History';
+import { IdCardPill, IdCardAction } from '../components/IdCard';
 import { Can } from '../components/Can';
 import { CollectFeePanel, CollectStockDuesPanel } from './Fees';
 
@@ -166,6 +167,18 @@ export default function StudentProfile() {
                             <span className="block font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3 mb-1.5">Status</span>
                             <div className="mt-1.5">{statusPill(student.status)}</div>
                             <div className="text-[11.5px] text-ink-3 mt-1">Admitted {date(student.admissionDate)}</div>
+                        </div>
+                        <div className="bg-white border border-line rounded-lg px-4 py-3.5">
+                            <span className="block font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3 mb-1.5">ID card</span>
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                                <IdCardPill idCard={student.idCard} />
+                                <IdCardAction student={student} />
+                            </div>
+                            <div className="text-[11.5px] text-ink-3 mt-1">
+                                {student.idCard?.issued
+                                    ? `${date(student.idCard.issuedAt)}${student.idCard.amount > 0 ? ` · ${money(student.idCard.amount)}` : ' · free'}`
+                                    : 'Not taken yet'}
+                            </div>
                         </div>
                     </div>
 

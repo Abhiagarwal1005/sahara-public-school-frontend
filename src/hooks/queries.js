@@ -54,6 +54,14 @@ export const useCreateSession = (onDone) =>
         onDone,
     });
 
+// The session's own settings — the ID card fee is edited in place on the
+// Settings list, the way a class's monthly fee is.
+export const useUpdateSession = () =>
+    useAction(({ id, ...body }) => patch(`/sessions/${id}`, body), {
+        invalidate: [['sessions'], ['session'], ['audit']],
+        success: 'Session updated',
+    });
+
 export const useActivateSession = () =>
     useAction((id) => post(`/sessions/${id}/activate`), {
         // ['session'] is the active-session query every screen reads; without
@@ -70,7 +78,7 @@ export const useStudentLedger = (id) =>
     useQuery({ queryKey: ['student', id, 'ledger'], queryFn: () => get(`/students/${id}/ledger`), enabled: Boolean(id) });
 
 export const useDefaulters = (params) =>
-    useQuery({ queryKey: ['defaulters', params], queryFn: () => get('/students/defaulters', params) });
+    useQuery({ queryKey: ['defaulters', params], queryFn: () => get('/students/defaulters', params), placeholderData: (p) => p });
 
 export const useCreateStudent = () =>
     useAction((body) => post('/students', body), { invalidate: [['students'], ['classes'], ['audit']], success: 'Student added' });
@@ -81,9 +89,29 @@ export const useUpdateStudent = () =>
 export const useMarkLeft = () =>
     useAction((id) => del(`/students/${id}`), { invalidate: [['students'], ['student'], ['classes'], ['audit']], success: 'Student marked as Left' });
 
+// ---- ID cards ----
+// Issuing takes money at the counter, so it moves the same caches a fee
+// collection does — the dashboard, the day book and the class-wise report all
+// read the rollup this writes to.
+export const useIdCardSummary = () =>
+    useQuery({ queryKey: ['idcards', 'summary'], queryFn: () => get('/students/id-cards/summary') });
+
+export const useIssueIdCard = (onDone) =>
+    useAction(({ id, ...body }) => post(`/students/${id}/id-card`, body), {
+        invalidate: [['students'], ['student'], ['idcards'], ['dashboard'], ['reports'], ['audit']],
+        success: (d) => (d.amount > 0 ? `ID card issued — ₹${d.amount} collected` : 'ID card issued (free)'),
+        onDone,
+    });
+
+export const useCancelIdCard = () =>
+    useAction(({ id, reason }) => del(`/students/${id}/id-card`, { reason }), {
+        invalidate: [['students'], ['student'], ['idcards'], ['dashboard'], ['reports'], ['audit']],
+        success: 'ID card cancelled',
+    });
+
 // ---- fees ----
 export const useFeeDemands = (params) =>
-    useQuery({ queryKey: ['fees', 'demands', params], queryFn: () => get('/fees/demands', params), enabled: Boolean(params?.month || params?.student) });
+    useQuery({ queryKey: ['fees', 'demands', params], queryFn: () => get('/fees/demands', params), enabled: Boolean(params?.month || params?.student), placeholderData: (p) => p });
 
 export const usePendingFees = (studentId) =>
     useQuery({ queryKey: ['fees', 'pending', studentId], queryFn: () => get(`/fees/pending/${studentId}`), enabled: Boolean(studentId) });
@@ -120,7 +148,7 @@ export const useVoidReceipt = () =>
 // A lead is connected to nothing else in the app, so nothing here invalidates
 // any other cache — and no other mutation touches ['leads'].
 export const useLeads = (params) =>
-    useQuery({ queryKey: ['leads', params], queryFn: () => get('/leads', params) });
+    useQuery({ queryKey: ['leads', params], queryFn: () => get('/leads', params), placeholderData: (p) => p });
 
 export const useLeadSummary = () =>
     useQuery({ queryKey: ['leads', 'summary'], queryFn: () => get('/leads/summary') });
@@ -157,12 +185,12 @@ export const useDeleteLead = (onDone) =>
 
 // ---- stock ----
 export const useStockItems = (params) =>
-    useQuery({ queryKey: ['stock', 'items', params], queryFn: () => get('/stock/items', params) });
+    useQuery({ queryKey: ['stock', 'items', params], queryFn: () => get('/stock/items', params), placeholderData: (p) => p });
 
 export const useLowStock = () => useQuery({ queryKey: ['stock', 'low'], queryFn: () => get('/stock/low') });
 
 export const useMovements = (id, params) =>
-    useQuery({ queryKey: ['stock', 'movements', id, params], queryFn: () => get(`/stock/items/${id}/movements`, params), enabled: Boolean(id) });
+    useQuery({ queryKey: ['stock', 'movements', id, params], queryFn: () => get(`/stock/items/${id}/movements`, params), enabled: Boolean(id), placeholderData: (p) => p });
 
 export const useCreateItem = () =>
     useAction((body) => post('/stock/items', body), { invalidate: [['stock'], ['audit']], success: 'Item added' });
@@ -175,7 +203,7 @@ export const useAdjustStock = () =>
 
 // ---- sales ----
 export const useSales = (params) =>
-    useQuery({ queryKey: ['sales', params], queryFn: () => get('/sales', params) });
+    useQuery({ queryKey: ['sales', params], queryFn: () => get('/sales', params), placeholderData: (p) => p });
 
 export const useCreateSale = (onDone) =>
     useAction((body) => post('/sales', body), {
@@ -226,7 +254,7 @@ export const usePayVendor = (onDone) =>
     });
 
 export const usePurchases = (params) =>
-    useQuery({ queryKey: ['purchases', params], queryFn: () => get('/purchases', params) });
+    useQuery({ queryKey: ['purchases', params], queryFn: () => get('/purchases', params), placeholderData: (p) => p });
 
 export const useCreatePurchase = (onDone) =>
     useAction((body) => post('/purchases', body), {
@@ -314,7 +342,7 @@ export const usePaySlip = () =>
 
 // ---- expenses ----
 export const useExpenses = (params) =>
-    useQuery({ queryKey: ['expenses', params], queryFn: () => get('/expenses', params) });
+    useQuery({ queryKey: ['expenses', params], queryFn: () => get('/expenses', params), placeholderData: (p) => p });
 
 export const useExpenseCategories = () =>
     useQuery({ queryKey: ['expenses', 'categories'], queryFn: () => get('/expenses/categories'), staleTime: 5 * 60_000 });

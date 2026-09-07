@@ -410,6 +410,129 @@ export function PageTitle({ title, sub, children }) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Numbered pagination.
+//
+// Every list in the app ends with this, so a clerk can jump to page 14 rather
+// than pressing Next thirteen times.
+//
+// The page WINDOW is what makes it work at any size: with 25 pages we never
+// render 25 buttons. First and last are always there, the current page keeps a
+// neighbour on each side, and the gaps collapse into an ellipsis. So the row
+// is a fixed width whether there are 3 pages or 300 — it never wraps and never
+// pushes the table sideways on a phone.
+//
+// `total` is optional. Without it (an endpoint that does not count) the
+// component degrades to Previous / Next, which is exactly what it can honestly
+// offer — page numbers with no total would be a guess.
+// ---------------------------------------------------------------------------
+
+// Which page numbers to draw. `null` marks a gap.
+const pageWindow = (current, totalPages, span = 1) => {
+    // Small enough to show whole — no ellipsis logic needed, and jumping is
+    // one tap for every page.
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+
+    const pages = new Set([1, totalPages]);
+    for (let p = current - span; p <= current + span; p += 1) {
+        if (p > 1 && p < totalPages) pages.add(p);
+    }
+    // Near an end the window is lopsided, so top it up to keep the row a
+    // constant width instead of visibly shrinking on page 1.
+    if (current <= 3) [2, 3, 4].forEach((p) => p < totalPages && pages.add(p));
+    if (current >= totalPages - 2) [totalPages - 3, totalPages - 2, totalPages - 1]
+        .forEach((p) => p > 1 && pages.add(p));
+
+    const sorted = [...pages].sort((a, b) => a - b);
+
+    const out = [];
+    for (const [i, p] of sorted.entries()) {
+        if (i && p - sorted[i - 1] > 1) out.push(null);
+        out.push(p);
+    }
+    return out;
+};
+
+export function Pagination({ pagination, onChange, className }) {
+    if (!pagination) return null;
+
+    const { currentPage = 1, pageSize = 20, totalItems, totalPages, hasNextPage, hasPrevPage } = pagination;
+
+    // One page and nothing after it — a pager would only be noise.
+    if (totalPages ? totalPages <= 1 : !hasNextPage && !hasPrevPage) return null;
+
+    const numbered = Number.isFinite(totalPages);
+    const from = (currentPage - 1) * pageSize + 1;
+    const to = numbered ? Math.min(currentPage * pageSize, totalItems) : currentPage * pageSize;
+
+    const go = (p) => {
+        if (p < 1 || (numbered && p > totalPages) || p === currentPage) return;
+        onChange(p);
+        // A long table leaves the reader at the bottom; the next page should
+        // start at its first row, not at its last.
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const numBtn =
+        'min-w-9 h-9 sm:min-w-8 sm:h-8 px-2 rounded-md border text-[12.5px] sm:text-[12px] font-medium tnum ' +
+        'transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+
+    return (
+        <div className={cx('no-print flex flex-wrap items-center justify-between gap-3 py-3', className)}>
+            <span className="text-[12px] text-ink-3 tnum">
+                {numbered ? <>{from}–{to} of <b className="text-ink-2 font-semibold">{totalItems}</b></> : <>Page {currentPage}</>}
+            </span>
+
+            <div className="flex items-center gap-1">
+                <button
+                    type="button"
+                    onClick={() => go(currentPage - 1)}
+                    disabled={!hasPrevPage && currentPage <= 1}
+                    aria-label="Previous page"
+                    className={cx(numBtn, 'bg-white text-ink-2 border-line-2 hover:bg-paper-2')}
+                >
+                    ‹
+                </button>
+
+                {numbered
+                    ? pageWindow(currentPage, totalPages).map((p, i) =>
+                          p === null ? (
+                              // Not a button — there is no single page it could go to.
+                              <span key={`gap${i}`} className="px-1 text-[12px] text-ink-3 select-none">…</span>
+                          ) : (
+                              <button
+                                  key={p}
+                                  type="button"
+                                  onClick={() => go(p)}
+                                  aria-label={`Page ${p}`}
+                                  aria-current={p === currentPage ? 'page' : undefined}
+                                  className={cx(
+                                      numBtn,
+                                      p === currentPage
+                                          ? 'bg-brand text-white border-brand font-semibold'
+                                          : 'bg-white text-ink-2 border-line-2 hover:bg-paper-2'
+                                  )}
+                              >
+                                  {p}
+                              </button>
+                          )
+                      )
+                    : null}
+
+                <button
+                    type="button"
+                    onClick={() => go(currentPage + 1)}
+                    disabled={!hasNextPage}
+                    aria-label="Next page"
+                    className={cx(numBtn, 'bg-white text-ink-2 border-line-2 hover:bg-paper-2')}
+                >
+                    ›
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // Sub-tabs — moving between screens inside a module
 export function Tabs({ tabs, value, onChange }) {
     return (

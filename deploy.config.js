@@ -40,4 +40,4 @@ export const API_PROD = 'https://sahara-public-school-backend.vercel.app';
 //
 // Leave it '' if the school has no Cloudinary account: uploads are already
 // optional and the UI hides the upload box, so nothing breaks.
-export const CLOUDINARY_CLOUD = 'demo';
+export const CLOUDINARY_CLOUD = 'dpts6rdrj';

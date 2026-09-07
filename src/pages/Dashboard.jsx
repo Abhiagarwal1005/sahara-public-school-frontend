@@ -115,6 +115,15 @@ export default function Dashboard() {
                                 value={money(d.spend.expenses)}
                                 sub={`purchases ${money(d.spend.purchases)}`}
                             />
+                            {/* Only once there is something to show — an ID card line
+                                reading ₹0 all year is a tile earning no space. */}
+                            {d.idCards?.collected > 0 && (
+                                <StatTile
+                                    label={`ID cards — ${monthShort(month)}`}
+                                    value={money(d.idCards.collected)}
+                                    sub="collected this month"
+                                />
+                            )}
                         </div>
 
                         <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr] items-stretch">

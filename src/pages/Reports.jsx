@@ -169,15 +169,17 @@ function IncomeExpense() {
             {(d) => (
                 <Card title="Income vs expense" hint={`${d.session} · straight from rollups`}>
                     <Table head={['Month', { label: 'Fees', align: 'right' }, { label: 'Stock', align: 'right' },
+                                  { label: 'ID cards', align: 'right' },
                                   { label: 'Total in', align: 'right' }, { label: 'Expenses', align: 'right' },
                                   { label: 'Salary', align: 'right' }, { label: 'Vendors', align: 'right' },
                                   { label: 'Total out', align: 'right' }, { label: 'Net', align: 'right' }]}
-                           isEmpty={!d.months.length} empty="No data yet" minWidth={880}>
+                           isEmpty={!d.months.length} empty="No data yet" minWidth={960}>
                         {d.months.map((m) => (
                             <Tr key={m.month}>
                                 <Td className="font-semibold whitespace-nowrap">{monthLabel(m.month)}</Td>
                                 <Td align="right">{num(m.feeCollected)}</Td>
                                 <Td align="right">{num(m.stockSales)}</Td>
+                                <Td align="right">{m.idCards ? num(m.idCards) : '—'}</Td>
                                 <Td align="right" className="font-semibold">{num(m.totalIn)}</Td>
                                 <Td align="right">{num(m.expenses)}</Td>
                                 <Td align="right">{num(m.salaries)}</Td>

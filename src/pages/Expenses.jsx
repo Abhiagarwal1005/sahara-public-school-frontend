@@ -6,10 +6,10 @@ import {
 import { money, num, date, toInputDate, monthLabel, currentMonthKey } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
-    Async, PageTitle, Tabs, Pill, EmptyState,
+    Async, PageTitle, Tabs, Pill, EmptyState, Pagination,
 } from '../components/ui';
 import { ImageUpload } from '../components/ImageUpload';
-import { imageUrl } from '../lib/cloudinary';
+import { BillView } from '../components/BillView';
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
 
@@ -83,7 +83,8 @@ function AddExpense({ onDone }) {
 }
 
 function Register({ month }) {
-    const list = useExpenses({ month, limit: 100 });
+    const [page, setPage] = useState(1);
+    const list = useExpenses({ month, page, limit: 20 });
     const byCat = useExpenseByCategory(month);
     const remove = useDeleteExpense();
     const [deleting, setDeleting] = useState(null);
@@ -95,6 +96,7 @@ function Register({ month }) {
                 <Card title={`Expense register — ${monthLabel(month)}`} hint="with bill photos">
                     <Async query={list}>
                         {(d) => (
+                            <>
                             <Table head={['Date', 'Category', { label: 'Detail', primary: true }, 'Mode', { label: 'Amount', align: 'right' }, 'Bill', '']}
                                    isEmpty={!d.items.length} empty="No expenses this month" minWidth={700}>
                                 {d.items.map((e) => (
@@ -105,14 +107,7 @@ function Register({ month }) {
                                         <Td className="font-mono text-[11.5px] text-ink-3">{e.mode}</Td>
                                         <Td align="right">{num(e.amount)}</Td>
                                         <Td>
-                                            {e.attachments?.length ? (
-                                                <a href={imageUrl(e.attachments[0].publicId, { width: 1200 })}
-                                                   target="_blank" rel="noreferrer">
-                                                    <img src={imageUrl(e.attachments[0].publicId, { width: 56, height: 56 })}
-                                                         alt="Bill" loading="lazy"
-                                                         className="w-8 h-8 object-cover rounded border border-line-2" />
-                                                </a>
-                                            ) : <Pill>None</Pill>}
+                                            <BillView images={e.attachments} title={e.title} />
                                         </Td>
                                         <Td>
                                             <Can perm="expense.delete">
@@ -124,6 +119,10 @@ function Register({ month }) {
                                     </Tr>
                                 ))}
                             </Table>
+                            <div className="px-4 border-t border-line">
+                                <Pagination pagination={d.pagination} onChange={setPage} />
+                            </div>
+                            </>
                         )}
                     </Async>
                 </Card>

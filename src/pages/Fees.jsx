@@ -8,7 +8,7 @@ import {
 import { money, num, monthLabel, currentMonthKey, monthOptions, percent, dateShort } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Textarea, Toolbar, Spacer, Modal, Meter,
-    Async, PageTitle, Tabs, Pill, statusPill, EmptyState, Loading, cx,
+    Async, PageTitle, Tabs, Pill, statusPill, EmptyState, Loading, Pagination, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
@@ -417,16 +417,17 @@ function DiscountModal({ demand, onClose }) {
 // ---- month view ----
 function MonthView({ month }) {
     const [cls, setCls] = useState('');
+    const [page, setPage] = useState(1);
     // The demand a discount is being given on. null = the dialog is closed.
     const [discounting, setDiscounting] = useState(null);
     const classes = useClasses();
-    const demands = useFeeDemands({ month, class: cls || undefined, limit: 100 });
+    const demands = useFeeDemands({ month, class: cls || undefined, page, limit: 20 });
     const generate = useGenerateFees();
 
     return (
         <>
             <Toolbar>
-                <Select className="w-auto" value={cls} onChange={(e) => setCls(e.target.value)}>
+                <Select className="w-auto" value={cls} onChange={(e) => { setCls(e.target.value); setPage(1); }}>
                     <option value="">All classes</option>
                     {classes.data?.map((c) => <option key={c._id} value={c._id}>{c.name} – {c.section}</option>)}
                 </Select>
@@ -442,6 +443,7 @@ function MonthView({ month }) {
             <Card title={`${monthLabel(month)} — fee demands`} hint="safe to press twice">
                 <Async query={demands}>
                     {(d) => (
+                        <>
                         <Table
                             head={['Student', 'Class', { label: 'Fee', align: 'right' }, { label: 'Discount', align: 'right' },
                                    { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, 'Status', '']}
@@ -475,6 +477,10 @@ function MonthView({ month }) {
                                 );
                             })}
                         </Table>
+                        <div className="px-4 border-t border-line">
+                            <Pagination pagination={d.pagination} onChange={setPage} />
+                        </div>
+                        </>
                     )}
                 </Async>
             </Card>
@@ -487,13 +493,14 @@ function MonthView({ month }) {
 // ---- defaulters ----
 function Defaulters() {
     const [cls, setCls] = useState('');
+    const [page, setPage] = useState(1);
     const classes = useClasses();
-    const list = useDefaulters({ class: cls || undefined, limit: 100 });
+    const list = useDefaulters({ class: cls || undefined, page, limit: 20 });
 
     return (
         <>
             <Toolbar>
-                <Select className="w-auto" value={cls} onChange={(e) => setCls(e.target.value)}>
+                <Select className="w-auto" value={cls} onChange={(e) => { setCls(e.target.value); setPage(1); }}>
                     <option value="">All classes</option>
                     {classes.data?.map((c) => <option key={c._id} value={c._id}>{c.name} – {c.section}</option>)}
                 </Select>
@@ -504,6 +511,7 @@ function Defaulters() {
             <Card title="Outstanding — largest first" hint="with phone numbers, so the office can work down the list">
                 <Async query={list}>
                     {(d) => (
+                        <>
                         <Table
                             head={['Student', 'Class', 'Guardian phone', { label: 'Fee due', align: 'right' },
                                    { label: 'Stock due', align: 'right' }, { label: 'Total', align: 'right' }]}
@@ -524,6 +532,10 @@ function Defaulters() {
                                 </Tr>
                             ))}
                         </Table>
+                        <div className="px-4 border-t border-line">
+                            <Pagination pagination={d.pagination} onChange={setPage} />
+                        </div>
+                        </>
                     )}
                 </Async>
             </Card>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAudit, useUsers } from '../hooks/queries';
 import { date, time } from '../lib/format';
 import {
-    Card, Table, Tr, Td, Button, Input, Select, Toolbar, Spacer, Async, PageTitle,
+    Card, Table, Tr, Td, Button, Input, Select, Toolbar, Spacer, Async, PageTitle, Pagination,
 } from '../components/ui';
 import { ChangeLines } from '../components/History';
 
@@ -123,15 +123,9 @@ export default function Activity() {
                                 {d.items.map((entry) => <ActivityRow key={entry._id} entry={entry} />)}
                             </Table>
 
-                            {(d.pagination.hasPrevPage || d.pagination.hasNextPage) && (
-                                <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-line">
-                                    <Button size="sm" disabled={!d.pagination.hasPrevPage}
-                                            onClick={() => setPage((n) => n - 1)}>← Newer</Button>
-                                    <span className="text-[12px] text-ink-3 font-mono">page {d.pagination.currentPage}</span>
-                                    <Button size="sm" disabled={!d.pagination.hasNextPage}
-                                            onClick={() => setPage((n) => n + 1)}>Older →</Button>
-                                </div>
-                            )}
+                            <div className="px-4 border-t border-line">
+                                <Pagination pagination={d.pagination} onChange={setPage} />
+                            </div>
                         </>
                     )}
                 </Async>

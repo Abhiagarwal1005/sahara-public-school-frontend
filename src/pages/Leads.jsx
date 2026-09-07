@@ -6,7 +6,7 @@ import {
 import { date, dateShort, toInputDate } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Textarea, Field, Toolbar, Spacer, Modal,
-    Async, PageTitle, Tabs, Pill, EmptyState, cx,
+    Async, PageTitle, Tabs, Pill, EmptyState, Pagination, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
 
@@ -387,7 +387,7 @@ function LeadDetail({ lead: row, onClose }) {
     );
 }
 
-function LeadTable({ params, empty }) {
+function LeadTable({ params, empty, onPage }) {
     const list = useLeads(params);
     const [picked, setPicked] = useState(null);
 
@@ -395,25 +395,30 @@ function LeadTable({ params, empty }) {
         <>
             <Async query={list}>
                 {(d) => (
-                    <Table head={[
-                        { label: 'Name', primary: true }, 'Guardian', 'Phone', 'Class',
-                        'Source', 'Follow-up', 'Status', '',
-                    ]} isEmpty={!d.items.length} empty={empty} minWidth={860}>
-                        {d.items.map((l) => (
-                            <Tr key={l._id}>
-                                <Td className="font-semibold whitespace-nowrap">{l.name}</Td>
-                                <Td>{l.guardianName || '—'}</Td>
-                                <Td className="font-mono text-[11.5px] text-ink-3">{l.phone}</Td>
-                                <Td>{l.classInterested || '—'}</Td>
-                                <Td className="text-[12px] text-ink-2">{l.source}</Td>
-                                <Td>{dueLabel(l.nextFollowUp)}</Td>
-                                <Td>{leadPill(l.status)}</Td>
-                                <Td align="right">
-                                    <Button size="sm" onClick={() => setPicked(l)}>Open</Button>
-                                </Td>
-                            </Tr>
-                        ))}
-                    </Table>
+                    <>
+                        <Table head={[
+                            { label: 'Name', primary: true }, 'Guardian', 'Phone', 'Class',
+                            'Source', 'Follow-up', 'Status', '',
+                        ]} isEmpty={!d.items.length} empty={empty} minWidth={860}>
+                            {d.items.map((l) => (
+                                <Tr key={l._id}>
+                                    <Td className="font-semibold whitespace-nowrap">{l.name}</Td>
+                                    <Td>{l.guardianName || '—'}</Td>
+                                    <Td className="font-mono text-[11.5px] text-ink-3">{l.phone}</Td>
+                                    <Td>{l.classInterested || '—'}</Td>
+                                    <Td className="text-[12px] text-ink-2">{l.source}</Td>
+                                    <Td>{dueLabel(l.nextFollowUp)}</Td>
+                                    <Td>{leadPill(l.status)}</Td>
+                                    <Td align="right">
+                                        <Button size="sm" onClick={() => setPicked(l)}>Open</Button>
+                                    </Td>
+                                </Tr>
+                            ))}
+                        </Table>
+                        <div className="px-4 border-t border-line">
+                            <Pagination pagination={d.pagination} onChange={onPage} />
+                        </div>
+                    </>
                 )}
             </Async>
 
@@ -427,6 +432,9 @@ export default function Leads() {
     const [search, setSearch] = useState('');
     const [status, setStatus] = useState('');
     const [adding, setAdding] = useState(false);
+    // Page belongs with the filters, not inside the table — changing a filter
+    // has to send you back to page 1, or you land on an empty page 12.
+    const [page, setPage] = useState(1);
     const summary = useLeadSummary();
 
     const s = summary.data;
@@ -437,10 +445,13 @@ export default function Leads() {
         { value: 'all', label: 'All enquiries' },
     ];
 
-    const params =
-        tab === 'due' ? { due: 'true', search: search || undefined }
-        : tab === 'open' ? { open: 'true', search: search || undefined }
-        : { search: search || undefined, status: status || undefined };
+    const params = {
+        ...(tab === 'due' ? { due: 'true' }
+            : tab === 'open' ? { open: 'true' }
+            : { status: status || undefined }),
+        search: search || undefined,
+        page,
+    };
 
     return (
         <>
@@ -450,14 +461,14 @@ export default function Leads() {
                 </Can>
             </PageTitle>
 
-            <Tabs tabs={tabs} value={tab} onChange={setTab} />
+            <Tabs tabs={tabs} value={tab} onChange={(t) => { setTab(t); setPage(1); }} />
 
             <Toolbar>
                 <Input className="flex-1 min-w-[180px] max-w-[280px]"
                        placeholder="Search name or phone…"
-                       value={search} onChange={(e) => setSearch(e.target.value)} />
+                       value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
                 {tab === 'all' && (
-                    <Select className="w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
+                    <Select className="w-auto" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
                         <option value="">All statuses</option>
                         {STATUSES.map((x) => <option key={x}>{x}</option>)}
                     </Select>
@@ -476,6 +487,7 @@ export default function Leads() {
             >
                 <LeadTable
                     params={params}
+                    onPage={setPage}
                     empty={tab === 'due' ? 'Nothing to follow up right now' : 'No enquiries yet'}
                 />
             </Card>

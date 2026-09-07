@@ -6,7 +6,7 @@ import {
 import { money, num, date, toInputDate } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal, ReasonModal,
-    Async, PageTitle, Tabs, Pill, EmptyState, Loading, cx,
+    Async, PageTitle, Tabs, Pill, EmptyState, Loading, Pagination, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
@@ -312,7 +312,10 @@ const MOVEMENT_LABEL = {
 };
 
 function Movements({ item, onClose }) {
-    const moves = useMovements(item?._id, { limit: 100 });
+    const [page, setPage] = useState(1);
+    // A busy item can have hundreds of movements; 20 at a time keeps the
+    // dialog the same height whatever the item's history looks like.
+    const moves = useMovements(item?._id, { page, limit: 20 });
     if (!item) return null;
 
     return (
@@ -338,6 +341,7 @@ function Movements({ item, onClose }) {
                     ))}
                 </Table>
             )}
+            {moves.data && <Pagination pagination={moves.data.pagination} onChange={setPage} />}
         </Modal>
     );
 }
@@ -347,7 +351,7 @@ function Items({ onSell }) {
     // adding an item — this only keeps it out of the browsable catalogue,
     // where the Principal and the counter staff spend their time.
     const isAdmin = useAuth((s) => s.user?.role) === 'Admin';
-    const [q, setQ] = useState({ search: '', category: '' });
+    const [q, setQ] = useState({ search: '', category: '', page: 1 });
     const [adding, setAdding] = useState(false);
     const [editing, setEditing] = useState(null);
     const [viewing, setViewing] = useState(null);
@@ -358,8 +362,8 @@ function Items({ onSell }) {
         <>
             <Toolbar>
                 <Input className="flex-1 min-w-[180px] max-w-[280px]" placeholder="Search items…"
-                       value={q.search} onChange={(e) => setQ({ ...q, search: e.target.value })} />
-                <Select className="w-auto" value={q.category} onChange={(e) => setQ({ ...q, category: e.target.value })}>
+                       value={q.search} onChange={(e) => setQ({ ...q, search: e.target.value, page: 1 })} />
+                <Select className="w-auto" value={q.category} onChange={(e) => setQ({ ...q, category: e.target.value, page: 1 })}>
                     <option value="">All categories</option>
                     {['Uniform', 'Book', 'Notebook', 'Stationery', 'Other'].map((c) => <option key={c}>{c}</option>)}
                 </Select>
@@ -451,6 +455,7 @@ function Items({ onSell }) {
                                 )}
                             </Card>
                         ))}
+                        <Pagination pagination={d.pagination} onChange={(page) => setQ((x) => ({ ...x, page }))} />
                     </div>
                 )}
             </Async>
@@ -631,18 +636,21 @@ function NewSale({ preselect, onDone }) {
 // ---- sales register ----
 function Register() {
     const [day, setDay] = useState(toInputDate(new Date()));
+    const [page, setPage] = useState(1);
     const [voiding, setVoiding] = useState(null);
-    const sales = useSales({ date: day, limit: 100 });
+    const sales = useSales({ date: day, page, limit: 20 });
     const voidSale = useVoidSale();
 
     return (
         <>
             <Toolbar>
-                <Input type="date" className="w-auto" value={day} onChange={(e) => setDay(e.target.value)} />
+                <Input type="date" className="w-auto" value={day}
+                       onChange={(e) => { setDay(e.target.value); setPage(1); }} />
             </Toolbar>
             <Card title="Sales register" hint={date(day)}>
                 <Async query={sales}>
                     {(d) => (
+                        <>
                         <Table head={['Bill', { label: 'Student', primary: true }, 'Class', 'Items', { label: 'Total', align: 'right' },
                                       { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, '']}
                                isEmpty={!d.items.length} empty="No sales on this date" minWidth={800}>
@@ -669,6 +677,10 @@ function Register() {
                                 </Tr>
                             ))}
                         </Table>
+                        <div className="px-4 border-t border-line">
+                            <Pagination pagination={d.pagination} onChange={setPage} />
+                        </div>
+                        </>
                     )}
                 </Async>
             </Card>

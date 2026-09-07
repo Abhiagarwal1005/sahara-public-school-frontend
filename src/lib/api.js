@@ -26,7 +26,7 @@ export const setAuthLostHandler = (fn) => { onAuthLost = fn; };
 api.interceptors.request.use((config) => {
     if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
 
-    // Khaali params bhejo hi mat. Screens filter state ko '' se initialise
+    // Never send an empty param. Screens initialise their filter
     // state to '' ("all classes"), and axios turns that into `?class=`.
     // To the backend '' is a value, not a missing one — and it fails objectId
     // validation with a 400. Cleaning it here saves every list API from that
@@ -101,8 +101,8 @@ api.interceptors.response.use(
 );
 
 // The backend always sends { success, message, errors, code }. Normalising
-// it into a predictable shape means no screen writes its own error
-// error handling na likhni pade.
+// it into a predictable shape means no screen has to write its own error
+// handling.
 function normalise(error) {
     const data = error.response?.data;
     const err = new Error(data?.message || error.message || 'Something went wrong');

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
     usePermissions, useUpdatePermissions, useUsers, useCreateUser, useUpdateUser,
     useResetPassword, useClasses, useCreateClass, useUpdateClass,
-    useSessions, useCreateSession, useActivateSession, useActiveSession,
+    useSessions, useCreateSession, useActivateSession, useActiveSession, useUpdateSession,
 } from '../hooks/queries';
 import { useAuth } from '../store/auth';
 import {
@@ -338,6 +338,9 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
     // rather than derived and hidden.
     const [months, setMonths] = useState([]);
     const [dates, setDates] = useState({ startDate: '', endDate: '' });
+    // What an ID card costs this year. One number, set once — the counter then
+    // issues cards without typing an amount.
+    const [idCardFee, setIdCardFee] = useState('');
     const [makeActive, setMakeActive] = useState(true);
     const [touched, setTouched] = useState(false);
 
@@ -353,6 +356,7 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
         setMonths(sessionMonths(suggested));
         setDates(sessionDates(suggested));
         setMakeActive(!hasActive);
+        setIdCardFee('');
         setTouched(false);
     }, [open, hasActive, existing]);
 
@@ -384,6 +388,7 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
                                startDate: dates.startDate,
                                endDate: dates.endDate,
                                feeMonths: months,
+                               idCardFee: Number(idCardFee) || 0,
                            })}>
                        {makeActive ? "Create & activate" : "Create"}
                    </Button>
@@ -426,6 +431,12 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
                     </div>
                 </Field>
 
+                <Field label="ID card fee"
+                       hint="what a student ID card costs this year · leave 0 and enter it per student instead">
+                    <Input inputMode="numeric" placeholder="0" value={idCardFee}
+                           onChange={(e) => setIdCardFee(e.target.value)} />
+                </Field>
+
                 <label className="flex items-start gap-2.5 text-[13px] cursor-pointer">
                     <input type="checkbox" className="mt-0.5 w-4 h-4 accent-brand shrink-0"
                            checked={makeActive} onChange={(e) => setMakeActive(e.target.checked)} />
@@ -451,6 +462,7 @@ function SessionTab() {
     const sessions = useSessions();
     const active = useActiveSession();
     const activate = useActivateSession();
+    const updateSession = useUpdateSession();
     const [adding, setAdding] = useState(false);
 
     const list = sessions.data || [];
@@ -479,7 +491,8 @@ function SessionTab() {
             <Card title="Academic session" hint="the partition key for the whole app">
                 <Async query={sessions}>
                     {() => (
-                        <Table head={['Session', 'Starts', 'Ends', { label: 'Fee months', align: 'right' }, 'Status', '']}
+                        <Table head={['Session', 'Starts', 'Ends', { label: 'Fee months', align: 'right' },
+                                      { label: 'ID card fee', align: 'right' }, 'Status', '']}
                                isEmpty={!list.length}
                                empty="No sessions yet — use + Session to create the first one"
                                minWidth={560}>
@@ -489,6 +502,17 @@ function SessionTab() {
                                     <Td className="font-mono text-[11.5px] text-ink-3">{date(s.startDate)}</Td>
                                     <Td className="font-mono text-[11.5px] text-ink-3">{date(s.endDate)}</Td>
                                     <Td align="right">{s.feeMonths?.length || 0}</Td>
+                                    <Td align="right">
+                                        {/* Edited in place, like a class's monthly fee. A new figure
+                                            applies to cards issued from now on; cards already given
+                                            keep the amount they were charged. */}
+                                        <Input className="w-24 py-1 text-right text-[12px]" inputMode="numeric"
+                                               defaultValue={s.idCardFee || 0}
+                                               onBlur={(e) => {
+                                                   const v = Number(e.target.value) || 0;
+                                                   if (v !== (s.idCardFee || 0)) updateSession.mutate({ id: s._id, idCardFee: v });
+                                               }} />
+                                    </Td>
                                     <Td>{s.isActive ? <Pill tone="ok">Active</Pill> : <Pill>Closed</Pill>}</Td>
                                     <Td>
                                         {!s.isActive && (

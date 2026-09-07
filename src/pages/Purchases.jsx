@@ -7,21 +7,23 @@ import {
 import { money, num, date, toInputDate } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
-    Async, PageTitle, Tabs, Pill, statusPill, EmptyState, cx,
+    Async, PageTitle, Tabs, statusPill, EmptyState, Pagination, cx,
 } from '../components/ui';
 import { ImageUpload } from '../components/ImageUpload';
+import { BillView } from '../components/BillView';
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
 
 // ---- bills list ----
 function Bills() {
     const [status, setStatus] = useState('');
-    const list = usePurchases({ status: status || undefined, limit: 100 });
+    const [page, setPage] = useState(1);
+    const list = usePurchases({ status: status || undefined, page, limit: 20 });
 
     return (
         <>
             <Toolbar>
-                <Select className="w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
+                <Select className="w-auto" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
                     <option value="">All bills</option>
                     <option value="Unpaid">Unpaid</option>
                     <option value="Partial">Partial</option>
@@ -32,6 +34,7 @@ function Bills() {
             <Card title="Purchase bills" hint="with bill photos">
                 <Async query={list}>
                     {(d) => (
+                        <>
                         <Table head={['Bill', { label: 'Vendor', primary: true }, 'Date', { label: 'Total', align: 'right' },
                                       { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, 'Status', 'Bill']}
                                isEmpty={!d.items.length} empty="No purchases recorded yet" minWidth={760}>
@@ -44,10 +47,16 @@ function Bills() {
                                     <Td align="right">{num(p.paidAmount)}</Td>
                                     <Td align="right" className={p.dueAmount > 0 ? 'text-crit font-semibold' : ''}>{num(p.dueAmount)}</Td>
                                     <Td>{statusPill(p.status)}</Td>
-                                    <Td>{p.billImage?.publicId ? <Pill tone="ok">Photo</Pill> : <Pill>None</Pill>}</Td>
+                                    {/* Was a plain "Photo" pill — it said a bill existed but
+                                        gave no way to look at it. */}
+                                    <Td><BillView images={[p.billImage]} title={`Bill ${p.billNo}`} /></Td>
                                 </Tr>
                             ))}
                         </Table>
+                        <div className="px-4 border-t border-line">
+                            <Pagination pagination={d.pagination} onChange={setPage} />
+                        </div>
+                        </>
                     )}
                 </Async>
             </Card>

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useStudents, useClasses, useCreateStudent } from '../hooks/queries';
-import { money, toInputDate } from '../lib/format';
+import { useStudents, useClasses, useCreateStudent, useIdCardSummary } from '../hooks/queries';
+import { money, toInputDate, num, percent } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
-    Async, PageTitle, Pill, statusPill,
+    Async, PageTitle, Pill, statusPill, Tabs, Meter, Pagination, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
+import { IdCardPill, IdCardAction } from '../components/IdCard';
 
 function AddStudent({ open, onClose }) {
     const classes = useClasses();
@@ -101,7 +102,76 @@ function AddStudent({ open, onClose }) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Class-wise ID cards — how many have taken theirs, how many have not, and
+// what came in.
+//
+// Straight off one aggregation over the students (a few hundred documents with
+// the flag on an index), not a scan of the ledger. Every class shows, including
+// one where nobody has taken theirs — a class missing from the list would read
+// as "done", which is the opposite of the truth.
+// ---------------------------------------------------------------------------
+function IdCards({ onOpenClass }) {
+    const summary = useIdCardSummary();
+
+    return (
+        <Async query={summary}>
+            {(d) => (
+                <>
+                    <div className="grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(178px,1fr))]">
+                        {[['Students', num(d.school.total)],
+                          ['Taken', num(d.school.issued)],
+                          ['Not taken', num(d.school.pending)],
+                          ['Collected', money(d.school.collected)]].map(([k, v], i) => (
+                            <div key={k} className="bg-white border border-line rounded-lg px-4 py-3.5">
+                                <span className="block font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3 mb-1.5">{k}</span>
+                                <div className={cx('text-[22px] font-semibold tnum', i === 2 && d.school.pending > 0 && 'text-warn')}>{v}</div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <Card title="Class-wise" hint={`${percent(d.school.percent)} of the school`}>
+                        <Table
+                            head={['Class', { label: 'Students', align: 'right' }, { label: 'Taken', align: 'right' },
+                                   { label: 'Not taken', align: 'right' }, { label: 'Collected', align: 'right' },
+                                   { label: 'Done', align: 'right' }, '']}
+                            isEmpty={!d.classes.length} empty="No classes yet" minWidth={720}
+                        >
+                            {d.classes.map((c) => (
+                                <Tr key={c.classId}>
+                                    <Td className="font-semibold whitespace-nowrap">{c.className}</Td>
+                                    <Td align="right">{c.total}</Td>
+                                    <Td align="right" className="text-good font-semibold">{c.issued}</Td>
+                                    <Td align="right" className={c.pending > 0 ? 'text-warn font-semibold' : 'text-ink-3'}>
+                                        {c.pending || '—'}
+                                    </Td>
+                                    <Td align="right">{c.collected ? money(c.collected) : '—'}</Td>
+                                    <Td align="right">
+                                        <span className="inline-flex items-center gap-2 justify-end">
+                                            <span className="tnum text-[12px] text-ink-2 w-9 text-right">{percent(c.percent)}</span>
+                                            <Meter value={c.percent} tone={c.percent < 50 ? 'crit' : c.percent < 100 ? 'warn' : 'brand'} />
+                                        </span>
+                                    </Td>
+                                    <Td>
+                                        {/* Straight to the working list: this class, not taken. */}
+                                        {c.pending > 0 && (
+                                            <Button size="sm" onClick={() => onOpenClass(c.classId)}>
+                                                Show the {c.pending} pending
+                                            </Button>
+                                        )}
+                                    </Td>
+                                </Tr>
+                            ))}
+                        </Table>
+                    </Card>
+                </>
+            )}
+        </Async>
+    );
+}
+
 export default function Students() {
+    const [tab, setTab] = useState('roster');
     const [filters, setFilters] = useState({ search: '', class: '', status: 'Active', page: 1 });
     const [adding, setAdding] = useState(false);
     const classes = useClasses();
@@ -117,6 +187,22 @@ export default function Students() {
                 </Can>
             </PageTitle>
 
+            <Tabs
+                tabs={[{ value: 'roster', label: 'Roster' }, { value: 'idcards', label: 'ID cards' }]}
+                value={tab} onChange={setTab}
+            />
+
+            {tab === 'idcards' && (
+                <IdCards onOpenClass={(classId) => {
+                    // Jump into the roster already filtered — the report answers
+                    // "which class", the roster answers "which children".
+                    setFilters({ search: '', class: classId, status: 'Active', idCard: 'pending', page: 1 });
+                    setTab('roster');
+                }} />
+            )}
+
+            {tab === 'roster' && (
+            <>
             <Toolbar>
                 <Input
                     className="flex-1 min-w-[180px] max-w-[300px]"
@@ -136,6 +222,13 @@ export default function Students() {
                     <option value="">All</option>
                     <option value="true">Only with dues</option>
                 </Select>
+                {/* Combines with the class filter, so "Class 5-B, not taken" is the
+                    working list the office prints and walks down. */}
+                <Select className="w-auto" value={filters.idCard || ''} onChange={(e) => set({ idCard: e.target.value || undefined })}>
+                    <option value="">ID card: all</option>
+                    <option value="pending">ID card: not taken</option>
+                    <option value="issued">ID card: taken</option>
+                </Select>
             </Toolbar>
 
             <Card>
@@ -144,10 +237,11 @@ export default function Students() {
                         <>
                             <Table
                                 head={['Adm. no', { label: 'Name', primary: true }, 'Class', 'Guardian phone',
-                                       { label: 'Monthly fee', align: 'right' }, { label: 'Outstanding', align: 'right' }, 'Status', '']}
+                                       { label: 'Monthly fee', align: 'right' }, { label: 'Outstanding', align: 'right' },
+                                       'Status', 'ID card', '']}
                                 isEmpty={!data.items.length}
                                 empty="No students found"
-                                minWidth={780}
+                                minWidth={920}
                             >
                                 {data.items.map((s) => {
                                     const due = (s.feeOutstanding || 0) + (s.stockOutstanding || 0);
@@ -164,27 +258,30 @@ export default function Students() {
                                             <Td align="right">{money(s.monthlyFee)}</Td>
                                             <Td align="right" className={due > 0 ? 'text-crit font-semibold' : ''}>{money(due)}</Td>
                                             <Td>{due === 0 ? <Pill tone="ok">Clear</Pill> : statusPill(s.status)}</Td>
+                                            <Td>
+                                                <span className="inline-flex items-center gap-2">
+                                                    <IdCardPill idCard={s.idCard} />
+                                                    <IdCardAction student={s} />
+                                                </span>
+                                            </Td>
                                             <Td><Link to={`/students/${s._id}`}><Button size="sm">Open</Button></Link></Td>
                                         </Tr>
                                     );
                                 })}
                             </Table>
 
-                            {(data.pagination.hasNextPage || data.pagination.hasPrevPage) && (
-                                <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-line">
-                                    <span className="text-[12px] text-ink-3">Page {data.pagination.currentPage}</span>
-                                    <div className="flex gap-2">
-                                        <Button size="sm" disabled={!data.pagination.hasPrevPage}
-                                                onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}>Previous</Button>
-                                        <Button size="sm" disabled={!data.pagination.hasNextPage}
-                                                onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}>Next</Button>
-                                    </div>
-                                </div>
-                            )}
+                            <div className="px-4 border-t border-line">
+                                <Pagination
+                                    pagination={data.pagination}
+                                    onChange={(page) => setFilters((f) => ({ ...f, page }))}
+                                />
+                            </div>
                         </>
                     )}
                 </Async>
             </Card>
+            </>
+            )}
 
             <AddStudent open={adding} onClose={() => setAdding(false)} />
         </>
