@@ -21,6 +21,15 @@ export const time = (d) =>
 // For <input type="date">
 export const toInputDate = (d) => new Date(d || Date.now()).toISOString().slice(0, 10);
 
+// The same thing, but for the day an INSTANT falls on in IST.
+//
+// toInputDate() above slices the UTC date, which is the previous day for
+// anything between midnight and 05:30 IST — so a payment taken at 00:30 would
+// send a date picker to yesterday. Use this whenever the date comes from a
+// stored timestamp rather than from the user.
+export const toInputDateIST = (d) =>
+    new Date(new Date(d || Date.now()).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // "2026-08" -> "August 2026"

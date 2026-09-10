@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useStudents, useClasses, useCreateStudent, useIdCardSummary } from '../hooks/queries';
+import { useStudents, useClasses, useCreateStudent, useIdCardSummary, useActiveSession } from '../hooks/queries';
 import { money, toInputDate, num, percent } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
@@ -176,12 +176,14 @@ export default function Students() {
     const [adding, setAdding] = useState(false);
     const classes = useClasses();
     const students = useStudents(filters);
+    // Read, never hardcoded — the roster belongs to whichever session is active.
+    const session = useActiveSession();
 
     const set = (patch) => setFilters((f) => ({ ...f, ...patch, page: 1 }));
 
     return (
         <>
-            <PageTitle title="Students" sub="Session 2026-27">
+            <PageTitle title="Students" sub={session.data?.name ? `Session ${session.data.name}` : ''}>
                 <Can perm="student.create">
                     <Button variant="primary" onClick={() => setAdding(true)}>+ Add student</Button>
                 </Can>

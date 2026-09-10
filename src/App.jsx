@@ -21,10 +21,15 @@ const Teachers = lazy(() => import('./pages/Teachers'));
 const Salary = lazy(() => import('./pages/Salary'));
 const Expenses = lazy(() => import('./pages/Expenses'));
 const Reports = lazy(() => import('./pages/Reports'));
+const VerifyPayments = lazy(() => import('./pages/VerifyPayments'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Activity = lazy(() => import('./pages/Activity'));
 
 const gate = (perm, el) => <RequirePermission perm={perm}>{el}</RequirePermission>;
+// For a page that holds several independently-grantable screens: any ONE of
+// them is enough to get through the door. Gating such a page on a single
+// permission is how a grantable capability ends up unreachable.
+const gateAny = (perms, el) => <RequirePermission any={perms}>{el}</RequirePermission>;
 
 export default function App() {
     const bootstrap = useAuth((s) => s.bootstrap);
@@ -50,7 +55,22 @@ export default function App() {
                         <Route path="teachers" element={gate('teacher.view', <Teachers />)} />
                         <Route path="salary" element={gate('salary.view', <Salary />)} />
                         <Route path="expenses" element={gate('expense.view', <Expenses />)} />
-                        <Route path="reports" element={gate('report.daybook', <Reports />)} />
+                        {/* Three separately-gated tabs live behind this one route.
+                            Gating the page on just one of them left a holder of
+                            either other permission unable to open it at all. */}
+                        <Route
+                            path="reports"
+                            element={gateAny(
+                                ['report.daybook', 'report.outstanding', 'report.dashboard'],
+                                <Reports />
+                            )}
+                        />
+                        {/* Its own screen, not a tab inside Reports. Checking the day's
+                            collections off against the cash box is a job somebody does
+                            daily — burying it two clicks inside a reports page is how it
+                            goes undone. Same shape as Activity: Admin-only by default,
+                            grantable, and gated on the capability rather than the role. */}
+                        <Route path="verify-payments" element={gate('payment.verify', <VerifyPayments />)} />
                         {/* Gated on the capability, not on the role — so an Admin who wants the
                             Principal to see the trail grants it from Settings, with no deploy.
                             Putting this inside Settings (which IS role-gated) would have made

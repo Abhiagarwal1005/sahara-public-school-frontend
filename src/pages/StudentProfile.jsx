@@ -9,6 +9,7 @@ import {
     Modal, ReasonModal, EmptyState,
 } from '../components/ui';
 import { HistoryCard } from '../components/History';
+import { VerifyMark } from '../components/VerifyMark';
 import { IdCardPill, IdCardAction } from '../components/IdCard';
 import { Can } from '../components/Can';
 import { CollectFeePanel, CollectStockDuesPanel } from './Fees';
@@ -210,8 +211,9 @@ export default function StudentProfile() {
                             simply no button, so the only way in was the API by hand. */}
                         <Card title="Receipts & payments" hint={`${payments.length} entries`}>
                             <Table
-                                head={['Date', 'Type', { label: 'Amount', align: 'right' }, 'Mode', 'Receipt', '']}
-                                isEmpty={!payments.length} empty="No payments yet" minWidth={520}
+                                head={['Date', 'Type', { label: 'Amount', align: 'right' }, 'Mode', 'Receipt',
+                                       'Verified', '']}
+                                isEmpty={!payments.length} empty="No payments yet" minWidth={600}
                             >
                                 {payments.map((p) => (
                                     <Tr key={p._id}>
@@ -222,6 +224,10 @@ export default function StudentProfile() {
                                         </Td>
                                         <Td>{p.mode}</Td>
                                         <Td className="font-mono text-[11.5px]">{p.receiptNo || '—'}</Td>
+                                        {/* Read-only. A parent asking "has my payment been
+                                            confirmed?" is answered here; signing it off happens
+                                            on the verification screen, against the cash box. */}
+                                        <Td><VerifyMark payment={p} /></Td>
                                         <Td>
                                             {/* Only a fee receipt can be voided from here — a stock receipt
                                                 belongs to its bill, and a reversal row is already the

@@ -20,6 +20,12 @@ const STATUSES = [
     { key: 'Absent', short: 'A', tone: 'bg-crit text-white border-crit' },
     { key: 'HalfDay', short: 'H', tone: 'bg-warn text-white border-warn' },
     { key: 'Leave', short: 'L', tone: 'bg-ink-3 text-white border-ink-3' },
+    // A declared school holiday — Diwali, Holi, a local closure. It is a PAID
+    // day in payroll, exactly like a Sunday, and the backend has always
+    // accepted it. There was simply no button, so a closed day could only be
+    // left unmarked — and an unmarked day is deliberately NOT paid. A week of
+    // Diwali therefore came off every teacher's salary.
+    { key: 'Holiday', short: 'HO', tone: 'bg-ink text-white border-ink' },
 ];
 
 // One letter per status, written out rather than taken from status[0].
@@ -50,6 +56,13 @@ function TeacherDaily() {
 
     const counts = Object.values(marks).reduce((a, s) => ({ ...a, [s]: (a[s] || 0) + 1 }), {});
 
+    const rows = sheet.data?.rows || [];
+    // A school holiday closes the school for EVERYONE, so marking it one teacher
+    // at a time is forty clicks for a single fact. One button sets the sheet.
+    const allHoliday = rows.length > 0 && rows.every((r) => marks[r.teacher] === 'Holiday');
+    const setEveryone = (status) =>
+        setMarks(Object.fromEntries(rows.map((r) => [r.teacher, status])));
+
     return (
         <>
             <Toolbar>
@@ -63,9 +76,16 @@ function TeacherDaily() {
                 <span className="tb-wide text-[12.5px] text-ink-2">
                     Present <b>{counts.Present || 0}</b> · Late <b>{counts.Late || 0}</b> ·
                     Absent <b>{counts.Absent || 0}</b> · Half <b>{counts.HalfDay || 0}</b> ·
-                    Leave <b>{counts.Leave || 0}</b>
+                    Leave <b>{counts.Leave || 0}</b> · Holiday <b>{counts.Holiday || 0}</b>
                 </span>
                 <Can perm="attendance.teacher.mark">
+                    {/* Hidden on a Sunday: that day is already a paid weekly off
+                        and the sheet is locked, so there is nothing to declare. */}
+                    {!sheet.data?.isSunday && rows.length > 0 && (
+                        <Button onClick={() => setEveryone(allHoliday ? 'Present' : 'Holiday')}>
+                            {allHoliday ? 'Not a holiday' : 'School holiday'}
+                        </Button>
+                    )}
                     <Button variant="primary" loading={mark.isPending} disabled={sheet.data?.isSunday}
                             onClick={() => mark.mutate({
                                 date: day,
@@ -79,7 +99,7 @@ function TeacherDaily() {
             <Card title={`Teacher attendance — ${date(day)}`}
                   hint={sheet.data?.isSunday
                       ? 'Sunday — weekly off, paid automatically'
-                      : 'everyone defaults to Present · change only the exceptions · LT = late (paid, counted against the allowance)'}>
+                      : 'everyone defaults to Present · change only the exceptions · LT = late (paid, counted against the allowance) · HO = school holiday (paid)'}>
                 <Async query={sheet}>
                     {(d) => (
                         <Table head={['Teacher', 'Designation', { label: 'Code', align: 'right' }, 'Mark']}
@@ -138,7 +158,7 @@ function TeacherMonthly({ month }) {
 
     return (
         <Card title={`${monthLabel(month)} — monthly grid`}
-              hint="P present · LT late · A absent · H half · L leave · grey = Sunday">
+              hint="P present · LT late · A absent · H half · L leave · HO holiday · grey = Sunday">
             <Async query={grid}>
                 {(g) => (
                     <div className="overflow-x-auto">

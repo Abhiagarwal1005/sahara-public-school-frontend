@@ -5,6 +5,7 @@ import {
     Card, Table, Tr, Td, Button, Input, Select, Toolbar, Spacer, Async, PageTitle, Pagination,
 } from '../components/ui';
 import { ChangeLines } from '../components/History';
+import { useAuth } from '../store/auth';
 
 // ---------------------------------------------------------------------------
 // ACTIVITY — who changed what.
@@ -34,6 +35,9 @@ const ENTITIES = [
 const MODULES = [
     'student', 'teacher', 'fee', 'sale', 'stock', 'purchase', 'vendor',
     'expense', 'salary', 'lead', 'class', 'session', 'attendance', 'user', 'permission',
+    // payment.verify / payment.unverify — who signed collected money off, and
+    // who took a tick back off again.
+    'payment',
 ];
 
 function ActivityRow({ entry }) {
@@ -75,7 +79,12 @@ function ActivityRow({ entry }) {
 }
 
 export default function Activity() {
-    const users = useUsers();
+    // `audit.view` is grantable, so a Principal can be given this screen. The
+    // user list behind the "who" filter is NOT grantable — /users is adminOnly —
+    // so for anyone else the query is skipped and the filter is left out
+    // entirely, rather than shown permanently empty behind a 403.
+    const isAdmin = useAuth((s) => s.user?.role) === 'Admin';
+    const users = useUsers({ enabled: isAdmin });
     const [filters, setFilters] = useState({ entity: '', action: '', actor: '', from: '', to: '' });
     const [page, setPage] = useState(1);
 
@@ -100,10 +109,12 @@ export default function Activity() {
                     <option value="">All records</option>
                     {ENTITIES.map((x) => <option key={x} value={x}>{x}</option>)}
                 </Select>
-                <Select className="w-auto" value={filters.actor} onChange={set('actor')}>
-                    <option value="">Anyone</option>
-                    {users.data?.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
-                </Select>
+                {isAdmin && (
+                    <Select className="w-auto" value={filters.actor} onChange={set('actor')}>
+                        <option value="">Anyone</option>
+                        {users.data?.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
+                    </Select>
+                )}
                 <Input type="date" className="w-auto" value={filters.from} onChange={set('from')} title="From" />
                 <Input type="date" className="w-auto" value={filters.to} onChange={set('to')} title="To" />
                 <Spacer />

@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import {
     useExpenses, useExpenseCategories, useCreateExpense, useDeleteExpense,
-    useExpenseByCategory, useCreateCategory,
+    useExpenseByCategory, useCreateCategory, useActiveSession,
 } from '../hooks/queries';
-import { money, num, date, toInputDate, monthLabel, currentMonthKey } from '../lib/format';
+import {
+    money, num, date, toInputDate, monthLabel, currentMonthKey, monthOptions, sessionMonths,
+} from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
     Async, PageTitle, Tabs, Pill, EmptyState, Pagination,
@@ -207,9 +209,22 @@ function Categories() {
 }
 
 export default function Expenses() {
+    const session = useActiveSession();
     const [tab, setTab] = useState('register');
-    const month = currentMonthKey();
+    // The month was pinned to today's, so last month's register could not be
+    // opened at all — even though the API has always accepted ?month, and every
+    // other module offers the picker.
+    const [month, setMonth] = useState(currentMonthKey());
     const can = useAuth((s) => s.can);
+
+    // All twelve months of the session, not just the billable ones: the school
+    // pays the electricity bill in a month it raises no fees. Today's month and
+    // whatever is selected are always in the list, so the dropdown can never
+    // show a blank selection — even before the session has loaded, or when
+    // looking at a month outside it.
+    const months = monthOptions([
+        ...new Set([...sessionMonths(session.data?.name), currentMonthKey(), month]),
+    ]);
 
     const tabs = [
         { value: 'register', label: 'Register' },
@@ -219,10 +234,19 @@ export default function Expenses() {
 
     return (
         <>
-            <PageTitle title="Expenses" sub={monthLabel(month)} />
+            <PageTitle title="Expenses" sub={monthLabel(month)}>
+                {tab === 'register' && (
+                    <Select className="w-auto" value={month} onChange={(e) => setMonth(e.target.value)}>
+                        {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </Select>
+                )}
+            </PageTitle>
             <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
-            {tab === 'register' && <Register month={month} />}
+            {/* key={month} remounts the register on a month change, which resets
+                its page back to 1 — otherwise switching from page 3 of a busy
+                month to a quiet one lands on a page that does not exist. */}
+            {tab === 'register' && <Register key={month} month={month} />}
             {tab === 'add' && <AddExpense onDone={() => setTab('register')} />}
             {tab === 'cats' && <Categories />}
         </>

@@ -102,7 +102,7 @@ function Permissions() {
                                         <div className="min-w-0">
                                             <b className="block text-[13px] font-semibold">{p.label}</b>
                                             <span className="block text-[11.5px] text-ink-3 font-mono">
-                                                {p.key}{locked && ' · Admin only, hamesha'}
+                                                {p.key}{locked && ' · Admin only, always'}
                                             </span>
                                         </div>
                                         <button

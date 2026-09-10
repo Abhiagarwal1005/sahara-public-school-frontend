@@ -39,8 +39,15 @@ const NAV = [
       icon: <><rect x="1.6" y="4" width="12.8" height="8.6" rx="1.4" /><circle cx="8" cy="8.3" r="2" /></> },
     { to: '/expenses', label: 'Expenses', perm: 'expense.view',
       icon: <><path d="M3.2 1.8h9.6v12.4l-2-1.2-1.6 1.2-1.6-1.2-1.6 1.2-1.6-1.2-1.2.9z" /><path d="M5.6 5.2h4.8M5.6 8h4.8" /></> },
-    { to: '/reports', label: 'Reports', perm: 'report.daybook',
+    // `any`, not `perm`: this page holds three separately-gated tabs, so holding
+    // any one of them is reason enough to see the menu item.
+    { to: '/reports', label: 'Reports',
+      any: ['report.daybook', 'report.outstanding', 'report.dashboard'],
       icon: <><path d="M2 13.4h12" /><rect x="3" y="7.6" width="2.6" height="4" /><rect x="6.8" y="4.4" width="2.6" height="7.2" /><rect x="10.6" y="2.2" width="2.6" height="9.4" /></> },
+    // A shield with a tick — "checked and signed off". Deliberately not the
+    // receipt shape Expenses uses, or the note shape Salary uses.
+    { to: '/verify-payments', label: 'Verify Payments', perm: 'payment.verify',
+      icon: <><path d="M8 1.6l5 2v4.2c0 3-2.1 5.4-5 6.6-2.9-1.2-5-3.6-5-6.6V3.6z" /><path d="M5.8 7.9l1.6 1.6 3-3.4" /></> },
     { to: '/activity', label: 'Activity', perm: 'audit.view',
       icon: <><path d="M8 3.6v4.6l3 1.8" /><circle cx="8" cy="8" r="6.2" /></> },
     { to: '/settings', label: 'Settings', adminOnly: true,
@@ -52,7 +59,9 @@ export function Layout() {
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
 
-    const items = NAV.filter((n) => (n.adminOnly ? user?.role === 'Admin' : can(n.perm)));
+    const items = NAV.filter((n) =>
+        n.adminOnly ? user?.role === 'Admin' : n.any ? n.any.some(can) : can(n.perm)
+    );
 
     const doLogout = async () => { await logout(); navigate('/login', { replace: true }); };
 

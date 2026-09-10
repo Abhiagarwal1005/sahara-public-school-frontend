@@ -373,6 +373,32 @@ export const useOutstanding = () => useQuery({ queryKey: ['reports', 'outstandin
 export const useIncomeExpense = () => useQuery({ queryKey: ['reports', 'income'], queryFn: () => get('/reports/income-expense') });
 export const useFeeTrend = () => useQuery({ queryKey: ['reports', 'trend'], queryFn: () => get('/reports/fee-trend') });
 
+// ---- payment verification ----
+// The tick is an oversight flag, not an accounting one — it moves no balance
+// and writes no ledger row. So these invalidate only what DISPLAYS the flag:
+// the queue itself, the day book, the student's own ledger, and the history.
+// Nothing here needs the dashboard or the rollups to be refetched.
+export const usePayments = (params) =>
+    useQuery({
+        queryKey: ['payments', params],
+        queryFn: () => get('/payments', params),
+        placeholderData: (p) => p,
+    });
+
+// `changed: false` means somebody else ticked the same row first. That is not a
+// failure — the row holds the state the user asked for — so it gets a plain
+// message rather than an error toast.
+const useVerifyAction = (path, done, already) =>
+    useAction((id) => post(`/payments/${id}/${path}`), {
+        invalidate: [['payments'], ['reports'], ['student'], ['audit']],
+        success: (d) => (d?.changed ? done : already),
+    });
+
+export const useVerifyPayment = () => useVerifyAction('verify', 'Payment verified', 'It was already verified');
+
+export const useUnverifyPayment = () =>
+    useVerifyAction('unverify', 'Verification removed', 'It was already unverified');
+
 // ---- edit history ----
 // Who changed what. The backend gates this on `audit.view`, which only Admin
 // holds by default — but it is grantable, so this is a normal query, not an
@@ -389,7 +415,12 @@ export const useEntityHistory = (entity, id) =>
     });
 
 // ---- users & permissions (Admin) ----
-export const useUsers = () => useQuery({ queryKey: ['users'], queryFn: () => get('/users') });
+// GET /users is adminOnly on the backend — user management deliberately sits
+// outside the permission system. But `audit.view` IS grantable, so the Activity
+// screen can legitimately be opened by a Principal; there it must SKIP this
+// query rather than fire a guaranteed 403 on every render.
+export const useUsers = ({ enabled = true } = {}) =>
+    useQuery({ queryKey: ['users'], queryFn: () => get('/users'), enabled });
 
 export const useCreateUser = (onDone) =>
     useAction((body) => post('/users', body), { invalidate: [['users'], ['audit']], success: 'User created', onDone });

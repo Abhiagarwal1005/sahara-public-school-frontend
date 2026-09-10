@@ -19,6 +19,9 @@ import { useAuth } from '../store/auth';
 // ---------------------------------------------------------------------------
 export function CollectFeePanel({ studentId, onDone }) {
     const pending = usePendingFees(studentId);
+    // For the printed receipt's header. It used to read "Session 2026-27" as a
+    // literal, so every receipt would still say that the year after a rollover.
+    const session = useActiveSession();
     const [amount, setAmount] = useState('');
     const [mode, setMode] = useState('Cash');
     const [receipt, setReceipt] = useState(null);
@@ -51,7 +54,9 @@ export function CollectFeePanel({ studentId, onDone }) {
                 <div className="print-only text-left">
                     <div className="text-center pb-3 mb-3 border-b-2 border-ink">
                         <b className="block text-lg font-bold">Sahara Public School</b>
-                        <span className="text-xs text-ink-3">Fee Receipt · Session 2026-27</span>
+                        <span className="text-xs text-ink-3">
+                            Fee Receipt{session.data?.name ? ` · Session ${session.data.name}` : ''}
+                        </span>
                     </div>
                     {[['Receipt no.', receipt.receiptNo], ['Student', receipt.student.name],
                       ['Admission no.', receipt.student.admissionNo], ['Class', receipt.student.className],
@@ -161,6 +166,7 @@ export function CollectFeePanel({ studentId, onDone }) {
 // ---------------------------------------------------------------------------
 export function CollectStockDuesPanel({ studentId, onDone }) {
     const dues = useStockDues(studentId);
+    const session = useActiveSession();
     const [amount, setAmount] = useState('');
     const [mode, setMode] = useState('Cash');
     const [receipt, setReceipt] = useState(null);
@@ -193,7 +199,10 @@ export function CollectStockDuesPanel({ studentId, onDone }) {
                 <div className="print-only text-left">
                     <div className="text-center pb-3 mb-3 border-b-2 border-ink">
                         <b className="block text-lg font-bold">Sahara Public School</b>
-                        <span className="text-xs text-ink-3">Uniform &amp; Books Receipt · Session 2026-27</span>
+                        <span className="text-xs text-ink-3">
+                            Uniform &amp; Books Receipt
+                            {session.data?.name ? ` · Session ${session.data.name}` : ''}
+                        </span>
                     </div>
                     {[['Receipt no.', receipt.receiptNo], ['Student', receipt.student.name],
                       ['Admission no.', receipt.student.admissionNo], ['Class', receipt.student.className],
@@ -434,13 +443,21 @@ function MonthView({ month }) {
                 <Spacer />
                 <Can perm="fee.generate">
                     <Button variant="primary" loading={generate.isPending}
+                            title={`Raises ${monthLabel(month)} for every active student who does not have it yet`}
                             onClick={() => generate.mutate({ month, classId: cls || undefined })}>
                         {monthLabel(month)} — raise fees
                     </Button>
                 </Can>
             </Toolbar>
 
-            <Card title={`${monthLabel(month)} — fee demands`} hint="safe to press twice">
+            {/* Raising a month that was already raised is the way a mid-session
+                admission is billed for it — the button adds only the students who
+                were missing, so it is worth saying that on the screen rather than
+                leaving it as folklore. */}
+            <Card
+                title={`${monthLabel(month)} — fee demands`}
+                hint="safe to press twice · picks up anyone admitted since"
+            >
                 <Async query={demands}>
                     {(d) => (
                         <>

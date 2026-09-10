@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { useDaybook, useOutstanding, useIncomeExpense, useVoidReceipt } from '../hooks/queries';
+import { useDaybook, useOutstanding, useIncomeExpense, useVoidReceipt, useActiveSession } from '../hooks/queries';
 import { money, num, date, time, toInputDate, monthLabel } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Toolbar, Spacer, Pill, ReasonModal,
     Async, PageTitle, Tabs, EmptyState, cx,
 } from '../components/ui';
+// Read-only here. Verifying is a job of its own and has a screen of its own.
+import { VerifyMark } from '../components/VerifyMark';
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
 
@@ -31,11 +33,11 @@ function Daybook() {
             <Async query={book}>
                 {(d) => (
                     <>
+                        {/* The whole day, one number each way. */}
                         <div className="grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(178px,1fr))]">
                             {[['Money in', money(d.totals.in), 'text-good'],
                               ['Money out', money(d.totals.out), 'text-crit'],
-                              ['Net', money(d.totals.net), d.totals.net >= 0 ? 'text-good' : 'text-crit'],
-                              ['Cash net', money(d.totals.netCash), 'text-ink']].map(([k, v, tone]) => (
+                              ['Net', money(d.totals.net), d.totals.net >= 0 ? 'text-good' : 'text-crit']].map(([k, v, tone]) => (
                                 <div key={k} className="bg-white border border-line rounded-lg px-4 py-3">
                                     <span className="block font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3 mb-1">{k}</span>
                                     <div className={cx('text-[20px] font-semibold tnum', tone)}>{v}</div>
@@ -43,10 +45,47 @@ function Daybook() {
                             ))}
                         </div>
 
+                        {/* -----------------------------------------------------------
+                            Then the same money, mode by mode.
+                            
+                            Closing a day is four separate jobs, not one: the cash box is
+                            counted, the UPI app is opened, the bank statement is checked,
+                            the cheque book is flipped through. A single "cash net" tile
+                            answered only the first of those, and the other three had to be
+                            worked out by reading down the table.
+                            
+                            Cash, UPI, Bank and Cheque are always here, even at zero, so the
+                            row keeps the same shape every day and the eye knows where to
+                            land. Anything else that moved money is appended by the server,
+                            so these always add back up to Money in / Money out.
+                            ----------------------------------------------------------- */}
+                        <div className="grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(178px,1fr))]">
+                            {(d.byMode || []).map((m) => (
+                                <div key={m.mode} className="bg-white border border-line rounded-lg px-4 py-3">
+                                    <span className="block font-mono text-[10px] tracking-[0.1em] uppercase text-ink-3 mb-1">
+                                        {m.mode}
+                                    </span>
+                                    <div className={cx(
+                                        'text-[20px] font-semibold tnum',
+                                        m.net > 0 ? 'text-good' : m.net < 0 ? 'text-crit' : 'text-ink-3'
+                                    )}>
+                                        {money(m.net)}
+                                    </div>
+                                    {/* Both directions, always. A net of zero can mean nothing
+                                        happened, or that ₹50,000 came in and went straight back
+                                        out — and those are not the same day to reconcile. */}
+                                    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] tnum">
+                                        <span className={m.in ? 'text-good' : 'text-ink-3'}>in {money(m.in)}</span>
+                                        <span className={m.out ? 'text-crit' : 'text-ink-3'}>out {money(m.out)}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
                         <Card title={`Day book — ${date(day)}`} hint="for reconciling against the cash box">
                             <Table head={['Time', { label: 'Particulars', primary: true }, 'Type', 'Mode', { label: 'In', align: 'right' },
-                                          { label: 'Out', align: 'right' }, '']}
-                                   isEmpty={!d.rows.length} empty="No entries on this date" minWidth={720}>
+                                          { label: 'Out', align: 'right' }, 'Verified', '']}
+                                   isEmpty={!d.rows.length} empty="No entries on this date" minWidth={800}>
                                 {d.rows.map((t) => (
                                     <Tr key={t._id} className={t.voided ? 'opacity-50' : ''}>
                                         <Td className="font-mono text-[11.5px] text-ink-3">{time(t.txnDate)}</Td>
@@ -66,6 +105,10 @@ function Daybook() {
                                         <Td align="right" className={t.direction === 'OUT' ? 'text-crit' : ''}>
                                             {t.direction === 'OUT' ? num(t.amount) : '—'}
                                         </Td>
+                                        {/* Read-only here. The day book is where a wrong entry gets
+                                            SPOTTED; signing one off is a deliberate sit-down with the
+                                            cash box, and it has a screen of its own. */}
+                                        <Td><VerifyMark payment={t} /></Td>
                                         <Td>
                                             {/* Reconciling against the cash box is where a wrong entry
                                                 gets spotted, so this is the second place a receipt can
@@ -191,11 +234,19 @@ function IncomeExpense() {
                             </Tr>
                         ))}
                         {d.months.length > 0 && (
+                            /* One cell per column, in order, with the column named beside
+                               it. The row used to be written as bare runs of dashes and
+                               was one cell short of the header — so every total rendered
+                               one column to the left of the figure it belonged to. */
                             <Tr className="bg-paper-2">
                                 <Td className="font-semibold">Session total</Td>
-                                <Td align="right">—</Td><Td align="right">—</Td>
+                                <Td align="right">—</Td>{/* Fees */}
+                                <Td align="right">—</Td>{/* Stock */}
+                                <Td align="right">—</Td>{/* ID cards */}
                                 <Td align="right" className="font-semibold">{num(d.totals.totalIn)}</Td>
-                                <Td align="right">—</Td><Td align="right">—</Td><Td align="right">—</Td>
+                                <Td align="right">—</Td>{/* Expenses */}
+                                <Td align="right">—</Td>{/* Salary */}
+                                <Td align="right">—</Td>{/* Vendors */}
                                 <Td align="right" className="font-semibold">{num(d.totals.totalOut)}</Td>
                                 <Td align="right" className={cx('font-bold', d.totals.net >= 0 ? 'text-good' : 'text-crit')}>
                                     {num(d.totals.net)}
@@ -209,24 +260,37 @@ function IncomeExpense() {
     );
 }
 
-export default function Reports() {
-    const [tab, setTab] = useState('daybook');
-    const can = useAuth((s) => s.can);
 
+export default function Reports() {
+    const [tab, setTab] = useState(null);
+    const can = useAuth((s) => s.can);
+    // The session name is read, never written into the page. Hardcoding it
+    // meant every screen still said 2026-27 the year after the rollover.
+    const session = useActiveSession();
+
+    // Every tab is gated, INCLUDING the day book. `report.outstanding` and
+    // `report.dashboard` are grantable on their own, so somebody can hold one
+    // of those and not the day book — and used to land on a day book that
+    // answered 403.
     const tabs = [
-        { value: 'daybook', label: 'Day book' },
+        ...(can('report.daybook') ? [{ value: 'daybook', label: 'Day book' }] : []),
         ...(can('report.outstanding') ? [{ value: 'outstanding', label: 'Outstanding' }] : []),
         ...(can('report.dashboard') ? [{ value: 'income', label: 'Income vs expense' }] : []),
     ];
 
+    // Never trust the stored tab on its own: it can name a tab this user cannot
+    // open (permissions changed under them, or it was simply the default). Fall
+    // back to the first tab they actually have.
+    const active = tabs.some((t) => t.value === tab) ? tab : tabs[0]?.value;
+
     return (
         <>
-            <PageTitle title="Reports" sub="Session 2026-27" />
-            <Tabs tabs={tabs} value={tab} onChange={setTab} />
+            <PageTitle title="Reports" sub={session.data?.name ? `Session ${session.data.name}` : ''} />
+            <Tabs tabs={tabs} value={active} onChange={setTab} />
 
-            {tab === 'daybook' && <Daybook />}
-            {tab === 'outstanding' && <Outstanding />}
-            {tab === 'income' && <IncomeExpense />}
+            {active === 'daybook' && <Daybook />}
+            {active === 'outstanding' && <Outstanding />}
+            {active === 'income' && <IncomeExpense />}
         </>
     );
 }

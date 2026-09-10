@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { useDashboard, useFeeTrend, useFeeSummary, useDaybook } from '../hooks/queries';
+import { useDashboard, useFeeTrend, useFeeSummary, useDaybook, useActiveSession } from '../hooks/queries';
 import { money, num, monthLabel, monthShort, currentMonthKey, percent, time, axisLabel } from '../lib/format';
 import {
     Card, StatTile, Table, Tr, Td, Pill, Meter, Async, PageTitle, EmptyState, cx,
@@ -81,13 +81,19 @@ function FeeTrend({ data }) {
 export default function Dashboard() {
     const dash = useDashboard();
     const trend = useFeeTrend();
+    // Read, never hardcoded — otherwise the header still says last year after
+    // the session rollover.
+    const session = useActiveSession();
     const month = currentMonthKey();
     const summary = useFeeSummary(month);
     const daybook = useDaybook(undefined);
 
     return (
         <>
-            <PageTitle title="Dashboard" sub={`${monthLabel(month)} · Session 2026-27`} />
+            <PageTitle
+                title="Dashboard"
+                sub={`${monthLabel(month)}${session.data?.name ? ` · Session ${session.data.name}` : ''}`}
+            />
 
             <Async query={dash}>
                 {(d) => (
@@ -144,7 +150,7 @@ export default function Dashboard() {
                                                 </span>
                                             </div>
                                             <Pill tone={l.currentStock === 0 ? 'crit' : 'warn'}>
-                                                {l.currentStock === 0 ? 'Khatam' : 'Low'}
+                                                {l.currentStock === 0 ? 'Out' : 'Low'}
                                             </Pill>
                                         </div>
                                     ))}
