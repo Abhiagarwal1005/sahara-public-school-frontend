@@ -7,6 +7,7 @@ import {
     Async, PageTitle, Pagination, cx,
 } from '../components/ui';
 import { VerifyMark, VerifyToggle } from '../components/VerifyMark';
+import { PaymentEdit } from '../components/PaymentEdit';
 
 // ---------------------------------------------------------------------------
 // VERIFY PAYMENTS
@@ -17,9 +18,19 @@ import { VerifyMark, VerifyToggle } from '../components/VerifyMark';
 //
 // Ticking changes ONLY the tick. No balance moves, no receipt is reissued, no
 // ledger row is written — see payment.service.js. That is what makes it safe to
-// untick a mistake, and it is why this screen can never be used to correct the
-// cash book. A wrong entry is voided from the Fees module, which writes a
-// reversal; the correction then shows up here as its own row.
+// untick a mistake.
+//
+// The tick also decides how long an entry stays correctable, which is why the
+// two live on one screen. Unverified, the amount, the mode and the reference
+// can all still be fixed here — the reconciliation is what turns those up, so
+// the fix belongs where the mismatch is found. Verified, the row is sealed: it
+// cannot be edited and it cannot be voided, from this screen or any other.
+//
+// What is never editable is WHO paid and WHAT FOR. A receipt against the wrong
+// student is not a mistyped figure — it is the wrong document, and that is
+// corrected by voiding through the module that collected it, which writes a
+// reversal and prints a fresh slip; the correction then shows up here as its
+// own row.
 // ---------------------------------------------------------------------------
 const PAYMENT_STATUSES = [
     { value: 'all', label: 'All payments' },
@@ -27,7 +38,15 @@ const PAYMENT_STATUSES = [
     { value: 'verified', label: 'Verified' },
 ];
 
-const PAYMENT_TYPE = { FEE: 'Fee', STOCK_SALE: 'Uniform & books', ID_CARD: 'ID card' };
+const PAYMENT_TYPE = {
+    FEE: 'Fee',
+    STOCK_SALE: 'Uniform & books',
+    ID_CARD: 'ID card',
+    // Admission, exams, trips. A student payment like any other, so it lands in
+    // this queue on its own — VERIFIABLE_FILTER asks what the money IS, not
+    // which module wrote it.
+    CHARGE: 'Other fee',
+};
 
 export default function VerifyPayments() {
     // Seeded from the IST day, not the UTC one — otherwise opening this before
@@ -134,7 +153,15 @@ export default function VerifyPayments() {
                                                 )}
                                             </span>
                                         </Td>
-                                        <Td><VerifyToggle payment={p} /></Td>
+                                        <Td>
+                                            <span className="inline-flex gap-1.5">
+                                                {/* Left of the tick on purpose: correcting comes
+                                                    before signing off, and once it is signed off
+                                                    this button is gone. */}
+                                                <PaymentEdit payment={p} />
+                                                <VerifyToggle payment={p} />
+                                            </span>
+                                        </Td>
                                     </Tr>
                                 ))}
                             </Table>

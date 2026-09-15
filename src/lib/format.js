@@ -18,17 +18,23 @@ export const dateShort = (d) =>
 export const time = (d) =>
     d ? new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
 
-// For <input type="date">
-export const toInputDate = (d) => new Date(d || Date.now()).toISOString().slice(0, 10);
-
-// The same thing, but for the day an INSTANT falls on in IST.
+// ---------------------------------------------------------------------------
+// For <input type="date"> — the day this instant falls on IN IST.
 //
-// toInputDate() above slices the UTC date, which is the previous day for
-// anything between midnight and 05:30 IST — so a payment taken at 00:30 would
-// send a date picker to yesterday. Use this whenever the date comes from a
-// stored timestamp rather than from the user.
-export const toInputDateIST = (d) =>
+// This used to slice the UTC date, which is the PREVIOUS day for anything
+// between midnight and 05:30 IST. Every caller passes "now" and means "today",
+// so the attendance sheet, the sales register, a new admission's date and a new
+// bill's date all opened on yesterday for anyone working early — silently, and
+// on exactly the screens where the date matters most.
+//
+// There is no caller that wants the UTC day, so there is only one function.
+// ---------------------------------------------------------------------------
+export const toInputDate = (d) =>
     new Date(new Date(d || Date.now()).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+
+// The same thing, named for the cases where the instant comes from a stored
+// timestamp rather than from the user and the IST-ness is the whole point.
+export const toInputDateIST = toInputDate;
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

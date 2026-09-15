@@ -27,6 +27,9 @@ const NAV = [
       icon: <><path d="M2.2 3.4h11.6v9.2H5.4L2.2 14.6z" /><path d="M5 6.6h6M5 9.2h4" /></> },
     { to: '/fees', label: 'Fees', perm: 'fee.view',
       icon: <path d="M4 2.8h8M4 5.6h8M9.6 2.8c1.7 0 2.6 1 2.6 2.4S11.3 8 9.6 8H4l6 5.2" /> },
+    // A rupee note with a plus — "the other money", next to Fees on purpose.
+    { to: '/other-fees', label: 'Other Fees', perm: 'charge.view',
+      icon: <><rect x="1.6" y="3.4" width="9.4" height="7.2" rx="1.2" /><circle cx="6.3" cy="7" r="1.6" /><path d="M12.6 10.4v3.4M10.9 12.1h3.4" /></> },
     { to: '/stock', label: 'Stock & Sales', perm: 'stock.view',
       icon: <><path d="M2 5.2L8 2.2l6 3v5.6l-6 3-6-3z" /><path d="M2 5.2l6 3 6-3M8 8.2v5.6" /></> },
     { to: '/purchases', label: 'Purchases', perm: 'purchase.view',
@@ -44,6 +47,11 @@ const NAV = [
     { to: '/reports', label: 'Reports',
       any: ['report.daybook', 'report.outstanding', 'report.dashboard'],
       icon: <><path d="M2 13.4h12" /><rect x="3" y="7.6" width="2.6" height="4" /><rect x="6.8" y="4.4" width="2.6" height="7.2" /><rect x="10.6" y="2.2" width="2.6" height="9.4" /></> },
+    // A cash box with a slot — the drawer somebody physically opens and counts.
+    // Sits right after Reports, because it answers the question the reports lead
+    // people to ask.
+    { to: '/cashbook', label: 'Cash Book', perm: 'report.cashbook',
+      icon: <><rect x="1.6" y="4.6" width="12.8" height="8.4" rx="1.4" /><path d="M1.6 7.6h12.8" /><path d="M6.4 10.4h3.2" /><path d="M4.6 4.6V3.2a1.2 1.2 0 011.2-1.2h4.4a1.2 1.2 0 011.2 1.2v1.4" /></> },
     // A shield with a tick — "checked and signed off". Deliberately not the
     // receipt shape Expenses uses, or the note shape Salary uses.
     { to: '/verify-payments', label: 'Verify Payments', perm: 'payment.verify',
@@ -58,6 +66,10 @@ export function Layout() {
     const { user, can, logout } = useAuth();
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
+    // Said once, in the sidebar, rather than discovered by hunting for a button
+    // that is not there. A Watcher's screens look identical to everyone else's
+    // minus the actions, and without this the natural reading is "it's broken".
+    const readOnly = Boolean(user?.readOnly);
 
     const items = NAV.filter((n) =>
         n.adminOnly ? user?.role === 'Admin' : n.any ? n.any.some(can) : can(n.perm)
@@ -96,9 +108,20 @@ export function Layout() {
                     </div>
                     <div className="min-w-0">
                         <b className="block text-[13px] font-semibold text-[#EAF2ED] leading-tight truncate">Sahara Public School</b>
-                        <span className="block text-[11px] font-mono text-sidebar-ink2">{user?.role}</span>
+                        <span className="block text-[11px] font-mono text-sidebar-ink2">
+                            {user?.role}{readOnly && ' · view only'}
+                        </span>
                     </div>
                 </div>
+
+                {readOnly && (
+                    <div className="mx-2 mb-2 px-2.5 py-2 rounded-md bg-white/5 border border-white/10">
+                        <p className="text-[11px] text-sidebar-ink leading-relaxed">
+                            You can open every screen and change nothing. Nothing is missing — this
+                            account is for watching the numbers, not entering them.
+                        </p>
+                    </div>
+                )}
 
                 <div className="px-4 pb-1.5 font-mono text-[10px] tracking-[0.12em] uppercase text-sidebar-ink2">Menu</div>
 
@@ -138,7 +161,9 @@ export function Layout() {
                     <button onClick={() => setOpen((o) => !o)} className="-ml-2 px-2 py-1.5 text-[14px] font-medium" aria-expanded={open}>
                         {open ? '✕ Close' : '☰ Menu'}
                     </button>
-                    <span className="text-[12px] text-ink-3 font-mono">{user?.role}</span>
+                    <span className="text-[12px] text-ink-3 font-mono">
+                        {user?.role}{readOnly && ' · view only'}
+                    </span>
                 </header>
 
                 <main className="flex-1 p-4 sm:p-5 lg:p-6 flex flex-col gap-4 min-w-0">

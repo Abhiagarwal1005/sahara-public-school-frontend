@@ -3,7 +3,7 @@ import {
     useTeacherSheet, useMarkTeachers, useTeacherGrid,
     useClassSheet, useMarkClasses, useClassMonthly, useActiveSession,
 } from '../hooks/queries';
-import { date, toInputDate, monthLabel, currentMonthKey, monthOptions, percent } from '../lib/format';
+import { date, toInputDate, monthLabel, currentMonthKey, monthOptions, percent, sessionMonths } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Toolbar, Spacer, Meter,
     Async, PageTitle, Tabs, EmptyState, cx,
@@ -37,6 +37,33 @@ const SHORT = {
 };
 
 // ---------------------------------------------------------------------------
+// ONCE MARKED, A DAY IS SEALED.
+//
+// The server writes attendance with $setOnInsert, so a row that exists is never
+// touched again — not by a second click, not by somebody opening last Tuesday
+// and pressing Save. Attendance is what payroll is built from, and a register
+// that can be rewritten after a slip was made is a register nobody can rely on.
+//
+// The lock is per PERSON per day, not per sheet: a teacher who joined after the
+// sheet was saved has no row for that day, so their day can still be marked.
+// That is why these screens show a sealed row read-only next to an editable one
+// rather than freezing the whole page.
+// ---------------------------------------------------------------------------
+const LockedMark = ({ status, at }) => (
+    <span
+        className="inline-flex items-center gap-1.5 text-[11.5px] font-mono font-semibold text-ink-3"
+        title={at ? `Marked on ${date(at)} — attendance cannot be changed once saved` : 'Attendance cannot be changed once saved'}
+    >
+        <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+             strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3.2" y="7" width="9.6" height="6.4" rx="1.2" />
+            <path d="M5.6 7V5.2a2.4 2.4 0 014.8 0V7" />
+        </svg>
+        {status}
+    </span>
+);
+
+// ---------------------------------------------------------------------------
 // Teacher sheet — everyone defaults to Present. In a school where most
 // people turn up, the work is marking EXCEPTIONS, not marking everyone.
 // The whole sheet saves in one call (the backend makes it one bulkWrite).
@@ -57,11 +84,18 @@ function TeacherDaily() {
     const counts = Object.values(marks).reduce((a, s) => ({ ...a, [s]: (a[s] || 0) + 1 }), {});
 
     const rows = sheet.data?.rows || [];
+    // Rows that have not been sealed yet — the only ones this screen can still
+    // change, and the only ones worth sending.
+    const open = rows.filter((r) => !r.locked);
+    const lockedCount = rows.length - open.length;
+    const fullyLocked = rows.length > 0 && open.length === 0;
+
     // A school holiday closes the school for EVERYONE, so marking it one teacher
-    // at a time is forty clicks for a single fact. One button sets the sheet.
-    const allHoliday = rows.length > 0 && rows.every((r) => marks[r.teacher] === 'Holiday');
+    // at a time is forty clicks for a single fact. One button sets the sheet —
+    // for the rows that are still open.
+    const allHoliday = open.length > 0 && open.every((r) => marks[r.teacher] === 'Holiday');
     const setEveryone = (status) =>
-        setMarks(Object.fromEntries(rows.map((r) => [r.teacher, status])));
+        setMarks({ ...marks, ...Object.fromEntries(open.map((r) => [r.teacher, status])) });
 
     return (
         <>
@@ -81,20 +115,39 @@ function TeacherDaily() {
                 <Can perm="attendance.teacher.mark">
                     {/* Hidden on a Sunday: that day is already a paid weekly off
                         and the sheet is locked, so there is nothing to declare. */}
-                    {!sheet.data?.isSunday && rows.length > 0 && (
+                    {!sheet.data?.isSunday && open.length > 0 && (
                         <Button onClick={() => setEveryone(allHoliday ? 'Present' : 'Holiday')}>
                             {allHoliday ? 'Not a holiday' : 'School holiday'}
                         </Button>
                     )}
-                    <Button variant="primary" loading={mark.isPending} disabled={sheet.data?.isSunday}
+                    <Button variant="primary" loading={mark.isPending}
+                            disabled={sheet.data?.isSunday || fullyLocked || !open.length}
+                            title={fullyLocked ? 'This day is already marked and cannot be changed' : undefined}
                             onClick={() => mark.mutate({
                                 date: day,
-                                entries: Object.entries(marks).map(([teacher, status]) => ({ teacher, status })),
+                                // Only the rows that are still open. Sending a sealed one
+                                // is harmless — the server refuses it — but it would make
+                                // the result read "38 already locked" on every save.
+                                entries: open.map((r) => ({ teacher: r.teacher, status: marks[r.teacher] })),
                             })}>
-                        Save sheet
+                        {fullyLocked ? 'Marked' : open.length < rows.length ? `Save ${open.length} remaining` : 'Save sheet'}
                     </Button>
                 </Can>
             </Toolbar>
+
+            {/* Said once, plainly, at the top — not discovered by clicking Save. */}
+            {fullyLocked && !sheet.data?.isSunday && (
+                <div className="bg-paper-2 border border-line rounded-md px-4 py-2.5 text-[12.5px] text-ink-2">
+                    <b className="text-ink">This day is marked and sealed.</b> Attendance cannot be changed
+                    once saved — it is what salary slips are built from. A teacher who joins later can
+                    still have this day marked.
+                </div>
+            )}
+            {!fullyLocked && lockedCount > 0 && (
+                <div className="bg-paper-2 border border-line rounded-md px-4 py-2.5 text-[12.5px] text-ink-2">
+                    {lockedCount} of {rows.length} already marked and sealed · {open.length} still to mark.
+                </div>
+            )}
 
             <Card title={`Teacher attendance — ${date(day)}`}
                   hint={sheet.data?.isSunday
@@ -108,7 +161,7 @@ function TeacherDaily() {
                                 // A Sunday is greyed and locked. There is nothing to decide —
                                 // it is paid either way — and leaving it clickable only invites
                                 // somebody to mark the staff Present on their day off.
-                                <Tr key={r.teacher} className={d.isSunday ? 'opacity-50' : undefined}>
+                                <Tr key={r.teacher} className={d.isSunday || r.locked ? 'opacity-60' : undefined}>
                                     <Td className="font-semibold whitespace-nowrap">{r.name}</Td>
                                     <Td className="font-mono text-[11.5px] text-ink-3">{r.designation || '—'}</Td>
                                     <Td align="right" className="text-ink-3">{r.employeeCode}</Td>
@@ -117,6 +170,11 @@ function TeacherDaily() {
                                             <span className="text-[11.5px] font-mono font-semibold text-ink-3">
                                                 Weekly off — paid
                                             </span>
+                                        ) : r.locked ? (
+                                            /* Sealed. Shown as what it IS, not as a row of dead
+                                               buttons — a disabled button invites a click and then
+                                               explains nothing. */
+                                            <LockedMark status={r.status} at={r.markedAt} />
                                         ) : (
                                             <div className="flex border border-line-2 rounded-md overflow-hidden w-max">
                                                 {STATUSES.map((s) => (
@@ -225,12 +283,24 @@ function ClassDaily() {
     const [present, setPresent] = useState({});
 
     useEffect(() => {
-        if (sheet.data) {
-            setPresent(Object.fromEntries(sheet.data.rows.map((r) => [r.class, r.present ?? r.totalStudents])));
-        }
+        if (!sheet.data) return;
+        // A sealed class keeps the figure it was saved with. An open one opens on
+        // full attendance, because in most classes on most days that is the answer
+        // and the work is correcting the exceptions.
+        setPresent(Object.fromEntries(
+            sheet.data.rows.map((r) => [r.class, r.locked ? r.present : (r.present ?? r.totalStudents)])
+        ));
     }, [sheet.data]);
 
     const rows = sheet.data?.rows || [];
+    const open = rows.filter((r) => !r.locked);
+    const lockedCount = rows.length - open.length;
+    const fullyLocked = rows.length > 0 && open.length === 0;
+
+    // What the day will read once this sheet is saved: sealed classes at their
+    // stored figure, open ones at whatever is typed in them right now. (The
+    // REPORT's totals count only what is actually marked — that lives on the
+    // server, where an unmarked class used to be counted as fully absent.)
     const totals = rows.reduce((a, r) => ({
         roll: a.roll + r.totalStudents,
         present: a.present + (Number(present[r.class]) || 0),
@@ -244,17 +314,32 @@ function ClassDaily() {
                 <span className="tb-wide text-[12.5px] text-ink-2">
                     Roll <b>{totals.roll}</b> · Present <b>{totals.present}</b> ·
                     <b> {totals.roll ? Math.round((totals.present / totals.roll) * 1000) / 10 : 0}%</b>
+                    {lockedCount < rows.length && (
+                        <span className="text-ink-3"> · {lockedCount} of {rows.length} classes marked</span>
+                    )}
                 </span>
                 <Can perm="attendance.class.mark">
                     <Button variant="primary" loading={mark.isPending}
+                            disabled={fullyLocked || !open.length}
+                            title={fullyLocked ? 'This day is already marked and cannot be changed' : undefined}
                             onClick={() => mark.mutate({
                                 date: day,
-                                entries: rows.map((r) => ({ class: r.class, present: Number(present[r.class]) || 0 })),
+                                // Sealed classes are left out — the server refuses them
+                                // anyway, and sending them would make every save report
+                                // a pile of "already locked".
+                                entries: open.map((r) => ({ class: r.class, present: Number(present[r.class]) || 0 })),
                             })}>
-                        Save
+                        {fullyLocked ? 'Marked' : open.length < rows.length ? `Save ${open.length} remaining` : 'Save'}
                     </Button>
                 </Can>
             </Toolbar>
+
+            {fullyLocked && (
+                <div className="bg-paper-2 border border-line rounded-md px-4 py-2.5 text-[12.5px] text-ink-2">
+                    <b className="text-ink">This day is marked and sealed.</b> Class attendance cannot be
+                    changed once saved — it is the figure quoted in inspections.
+                </div>
+            )}
 
             <Card title={`Class attendance — ${date(day)}`} hint="totals only, not per student">
                 <Async query={sheet}>
@@ -266,13 +351,17 @@ function ClassDaily() {
                                 const p = Number(present[r.class]) || 0;
                                 const over = p > r.totalStudents;
                                 return (
-                                    <Tr key={r.class}>
+                                    <Tr key={r.class} className={r.locked ? 'opacity-60' : undefined}>
                                         <Td className="font-semibold whitespace-nowrap">{r.className}</Td>
                                         <Td align="right">{r.totalStudents}</Td>
                                         <Td align="right">
-                                            <Input className="w-20 py-1 text-right text-[12px]" inputMode="numeric"
-                                                   error={over} value={present[r.class] ?? ''}
-                                                   onChange={(e) => setPresent({ ...present, [r.class]: e.target.value })} />
+                                            {r.locked ? (
+                                                <LockedMark status={`${r.present} present`} at={r.markedAt} />
+                                            ) : (
+                                                <Input className="w-20 py-1 text-right text-[12px]" inputMode="numeric"
+                                                       error={over} value={present[r.class] ?? ''}
+                                                       onChange={(e) => setPresent({ ...present, [r.class]: e.target.value })} />
+                                            )}
                                         </Td>
                                         <Td align="right" className={over ? 'text-crit' : ''}>
                                             {over ? 'more than roll' : r.totalStudents - p}
@@ -332,7 +421,11 @@ export default function Attendance() {
     const [month, setMonth] = useState(currentMonthKey());
     const can = useAuth((s) => s.can);
 
-    const months = monthOptions(session.data?.feeMonths?.length ? session.data.feeMonths : [currentMonthKey()]);
+    // Every month of the session, not just the billable ones — school runs in
+    // months no fee is raised in, and the register has to be readable for them.
+    const months = monthOptions([
+        ...new Set([...sessionMonths(session.data?.name), currentMonthKey(), month]),
+    ]);
 
     const tabs = [
         { value: 'teachers', label: 'Teachers — daily' },

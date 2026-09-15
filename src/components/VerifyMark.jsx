@@ -1,4 +1,5 @@
 import { useVerifyPayment, useUnverifyPayment } from '../hooks/queries';
+import { useAuth } from '../store/auth';
 import { date, time } from '../lib/format';
 import { Button, cx } from './ui';
 
@@ -53,8 +54,13 @@ export function VerifyMark({ payment, className }) {
 export function VerifyToggle({ payment }) {
     const verify = useVerifyPayment();
     const unverify = useUnverifyPayment();
+    // `payment.verify` is the one permission that covers both opening the queue
+    // and ticking a row off, so a read-only role holds it and still must not see
+    // this button. The server refuses the POST either way; this stops the button
+    // being offered and then failing, which is the worst of both.
+    const readOnly = useAuth((s) => s.isReadOnly());
 
-    if (!payment?.verifiable) return null;
+    if (!payment?.verifiable || readOnly) return null;
 
     const done = Boolean(payment.verified);
     const busy = verify.isPending || unverify.isPending;

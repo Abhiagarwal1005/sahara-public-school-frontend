@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './store/auth';
 import { Layout } from './components/Layout';
-import { RequireAuth, RequirePermission } from './components/Can';
+import { RequireAuth, RequirePermission, RequireAdmin } from './components/Can';
 import { Toasts } from './components/Toast';
 import { Loading } from './components/ui';
 
@@ -14,6 +14,7 @@ const Students = lazy(() => import('./pages/Students'));
 const StudentProfile = lazy(() => import('./pages/StudentProfile'));
 const Leads = lazy(() => import('./pages/Leads'));
 const Fees = lazy(() => import('./pages/Fees'));
+const OtherFees = lazy(() => import('./pages/OtherFees'));
 const Stock = lazy(() => import('./pages/Stock'));
 const Purchases = lazy(() => import('./pages/Purchases'));
 const Attendance = lazy(() => import('./pages/Attendance'));
@@ -21,6 +22,7 @@ const Teachers = lazy(() => import('./pages/Teachers'));
 const Salary = lazy(() => import('./pages/Salary'));
 const Expenses = lazy(() => import('./pages/Expenses'));
 const Reports = lazy(() => import('./pages/Reports'));
+const Cashbook = lazy(() => import('./pages/Cashbook'));
 const VerifyPayments = lazy(() => import('./pages/VerifyPayments'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Activity = lazy(() => import('./pages/Activity'));
@@ -49,6 +51,12 @@ export default function App() {
                         <Route path="students/:id" element={gate('student.view', <StudentProfile />)} />
                         <Route path="leads" element={gate('lead.view', <Leads />)} />
                         <Route path="fees" element={gate('fee.view', <Fees />)} />
+                        {/* Admission, exams, trips — everything charged beyond the
+                            monthly fee. Its own screen, not a tab inside Fees: the
+                            monthly fee is a standing arrangement and these are
+                            decisions somebody makes, and they are collected,
+                            reported and waived separately. */}
+                        <Route path="other-fees" element={gate('charge.view', <OtherFees />)} />
                         <Route path="stock" element={gate('stock.view', <Stock />)} />
                         <Route path="purchases" element={gate('purchase.view', <Purchases />)} />
                         <Route path="attendance" element={gate('attendance.teacher.view', <Attendance />)} />
@@ -65,6 +73,13 @@ export default function App() {
                                 <Reports />
                             )}
                         />
+                        {/* Its own screen, not a tab inside Reports. "What is in hand"
+                            is the question somebody asks at the end of every day, and
+                            it is the school's whole liquid position rather than one
+                            report among three — burying it behind a tab is how it stops
+                            being looked at. Gated on its own capability, so an Admin can
+                            hand it to the Principal without handing over the day book. */}
+                        <Route path="cashbook" element={gate('report.cashbook', <Cashbook />)} />
                         {/* Its own screen, not a tab inside Reports. Checking the day's
                             collections off against the cash box is a job somebody does
                             daily — burying it two clicks inside a reports page is how it
@@ -76,7 +91,12 @@ export default function App() {
                             Putting this inside Settings (which IS role-gated) would have made
                             `audit.view` grantable but unreachable. */}
                         <Route path="activity" element={gate('audit.view', <Activity />)} />
-                        <Route path="settings" element={<Settings />} />
+                        {/* Admin-only, and gated HERE like every other route rather
+                            than only inside the component. Settings holds user
+                            management and the permission switches, which sit outside
+                            the permission system on purpose — a role that can widen
+                            its own permissions is not a permission system. */}
+                        <Route path="settings" element={<RequireAdmin><Settings /></RequireAdmin>} />
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Route>
                 </Routes>

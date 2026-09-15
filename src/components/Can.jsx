@@ -41,6 +41,31 @@ export function RequireAuth({ children }) {
     return children;
 }
 
+// The one gate that is not a permission.
+//
+// User management and the permission switches deliberately sit OUTSIDE the
+// permission system: if `user.manage` were a normal grantable key, the Principal
+// could hand it to themselves and nobody would see it happen. So this asks for
+// the role, and it is the only place in the app that does.
+export function RequireAdmin({ children }) {
+    const role = useAuth((s) => s.user?.role);
+
+    if (role !== 'Admin') {
+        return (
+            <Card className="max-w-lg mx-auto mt-10">
+                <div className="px-6 py-10 text-center">
+                    <p className="text-[14px] font-semibold mb-1.5">Settings is Admin-only</p>
+                    <p className="text-[12.5px] text-ink-3">
+                        User management and permissions sit outside the permission system, deliberately.
+                        A role that can widen its own permissions is not a permission system.
+                    </p>
+                </div>
+            </Card>
+        );
+    }
+    return children;
+}
+
 // Route-level gate. A clear message rather than a blank screen — otherwise
 // the user assumes the app is broken.
 export function RequirePermission({ perm, any, children }) {

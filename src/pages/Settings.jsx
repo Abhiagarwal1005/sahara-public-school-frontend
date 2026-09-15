@@ -3,15 +3,16 @@ import {
     usePermissions, useUpdatePermissions, useUsers, useCreateUser, useUpdateUser,
     useResetPassword, useClasses, useCreateClass, useUpdateClass,
     useSessions, useCreateSession, useActivateSession, useActiveSession, useUpdateSession,
+    useRolloverPlan, useRolloverClasses, useRolloverPromote,
 } from '../hooks/queries';
 import { useAuth } from '../store/auth';
 import {
-    money, date, toInputDate, monthLabel, monthShort,
+    money, num, date, toInputDate, monthLabel, monthShort,
     sessionMonths, sessionDates, suggestSessionName, isSaneSessionName,
 } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
-    Async, PageTitle, Tabs, Pill, statusPill, EmptyState, cx,
+    Async, PageTitle, Tabs, Pill, statusPill, EmptyState, Loading, cx,
 } from '../components/ui';
 import { toast } from '../components/Toast';
 
@@ -41,9 +42,22 @@ function Permissions() {
     if (perms.isPending || !draft) return <Card><EmptyState>Loading…</EmptyState></Card>;
     if (perms.isError) return <Card><EmptyState>{perms.error.message}</EmptyState></Card>;
 
-    const { catalogue, adminOnly, grants } = perms.data;
+    const { catalogue, adminOnly, readKeys = [], grants } = perms.data;
     const saved = new Set(grants[role]?.permissions || []);
     const dirty = draft.size !== saved.size || [...draft].some((k) => !saved.has(k));
+
+    // Every role the server actually knows about, minus Admin (who has no row
+    // and always has everything). Hardcoding the pair here meant a role added on
+    // the server had no tab and could never be configured.
+    const roles = Object.keys(grants).filter((r) => r !== 'Admin');
+
+    // A read-only role can hold READ keys and nothing else — the server refuses
+    // to save a write key against one. So its write switches are shown locked
+    // rather than merely off: a switch that silently refuses to stick would be
+    // worse than no switch at all.
+    const roleIsReadOnly = Boolean(grants[role]?.readOnly);
+    const readable = new Set(readKeys);
+    const isLocked = (key) => adminOnly.includes(key) || (roleIsReadOnly && !readable.has(key));
 
     // Grouped by module — the same grouping as the app's menu, so the Admin
     // thinks in the same language they use the app in
@@ -53,7 +67,7 @@ function Permissions() {
     }, {});
 
     const toggle = (key) => {
-        if (adminOnly.includes(key)) return;
+        if (isLocked(key)) return;
         const next = new Set(draft);
         next.has(key) ? next.delete(key) : next.add(key);
         setDraft(next);
@@ -69,7 +83,7 @@ function Permissions() {
         <>
             <Toolbar>
                 <div className="flex border border-line-2 rounded-md overflow-hidden w-max">
-                    {['Principal', 'Accountant'].map((r) => (
+                    {roles.map((r) => (
                         <button key={r} onClick={() => setRole(r)}
                                 className={cx('px-4 py-1.5 text-[12.5px] border-r border-line-2 last:border-r-0',
                                               role === r ? 'bg-brand text-white font-semibold' : 'bg-paper-2 text-ink-2 hover:bg-white')}>
@@ -86,6 +100,15 @@ function Permissions() {
             </Toolbar>
 
             <Card title={`${role} — what this role can do`} hint="changes apply immediately · no deploy">
+                {roleIsReadOnly && (
+                    <div className="px-4 py-3 bg-paper-2 border-b border-line text-[12.5px] text-ink-2">
+                        <b className="text-ink">{role} can view everything and change nothing.</b>{' '}
+                        Every switch below that is not a view is locked, and the server refuses to save
+                        one against this role — so it cannot be turned on here or anywhere else. Even
+                        with a key granted, every request that is not a read is refused before it
+                        reaches the module. What you CAN do here is narrow what they see.
+                    </div>
+                )}
                 <div className="flex flex-col">
                     {Object.entries(groups).map(([module, list]) => (
                         <div key={module}>
@@ -93,7 +116,7 @@ function Permissions() {
                                 {module}
                             </div>
                             {list.map((p) => {
-                                const locked = adminOnly.includes(p.key);
+                                const locked = isLocked(p.key);
                                 const on = draft.has(p.key);
                                 return (
                                     <div key={p.key}
@@ -102,7 +125,9 @@ function Permissions() {
                                         <div className="min-w-0">
                                             <b className="block text-[13px] font-semibold">{p.label}</b>
                                             <span className="block text-[11.5px] text-ink-3 font-mono">
-                                                {p.key}{locked && ' · Admin only, always'}
+                                                {p.key}
+                                                {adminOnly.includes(p.key) && ' · Admin only, always'}
+                                                {!adminOnly.includes(p.key) && locked && ` · ${role} can only view`}
                                             </span>
                                         </div>
                                         <button
@@ -136,6 +161,10 @@ function Users() {
     const users = useUsers();
     const create = useCreateUser((d) => setTempPassword(d));
     const update = useUpdateUser();
+    // The role list comes from the permission catalogue, so a role added on the
+    // server appears here without this file being touched. It was three hardcoded
+    // <option>s, which is how a new role ends up impossible to assign.
+    const perms = usePermissions();
     const reset = useResetPassword((d) => setTempPassword({ user: { name: 'Reset' }, tempPassword: d.tempPassword }));
     const [adding, setAdding] = useState(false);
     const [tempPassword, setTempPassword] = useState(null);
@@ -160,7 +189,12 @@ function Users() {
                                         {u.name}{u._id === me?.id && <span className="text-ink-3 font-normal"> (you)</span>}
                                     </Td>
                                     <Td className="font-mono text-[11.5px] text-ink-3">{u.username}</Td>
-                                    <Td><Pill tone={u.role === 'Admin' ? 'ok' : 'neutral'}>{u.role}</Pill></Td>
+                                    <Td>
+                                        <Pill tone={u.role === 'Admin' ? 'ok' : 'neutral'}>{u.role}</Pill>
+                                        {perms.data?.grants?.[u.role]?.readOnly && (
+                                            <span className="block text-[11px] text-ink-3 mt-0.5">view only</span>
+                                        )}
+                                    </Td>
                                     <Td className="font-mono text-[11.5px] text-ink-3">{u.phone || '—'}</Td>
                                     <Td className="font-mono text-[11.5px] text-ink-3 whitespace-nowrap">
                                         {u.lastLoginAt ? date(u.lastLoginAt) : 'never'}
@@ -206,9 +240,16 @@ function Users() {
                         <Input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase() })} />
                     </Field>
                     <Field label="Phone"><Input inputMode="numeric" maxLength={10} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
-                    <Field label="Role" required>
+                    <Field label="Role" required
+                           hint={perms.data?.grants?.[form.role]?.readOnly
+                               ? 'This role can open every screen and change nothing — for a trustee or an auditor'
+                               : undefined}>
                         <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                            <option>Accountant</option><option>Principal</option><option>Admin</option>
+                            {/* grants carries an entry for every role the server knows,
+                                Admin included — so this list is complete by itself. */}
+                            {Object.keys(perms.data?.grants || { Accountant: 1, Principal: 1, Admin: 1 }).map((r) => (
+                                <option key={r}>{r}</option>
+                            ))}
                         </Select>
                     </Field>
                     <p className="text-[11.5px] text-ink-3">
@@ -341,6 +382,10 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
     // What an ID card costs this year. One number, set once — the counter then
     // issues cards without typing an amount.
     const [idCardFee, setIdCardFee] = useState('');
+    // What the school already had the morning this session opened. Without it
+    // the cash book reports "in hand" as only the money that has moved SINCE —
+    // wrong by exactly the amount the school started with, all year.
+    const [opening, setOpening] = useState({ Cash: '', UPI: '', Bank: '', Cheque: '' });
     const [makeActive, setMakeActive] = useState(true);
     const [touched, setTouched] = useState(false);
 
@@ -357,6 +402,7 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
         setDates(sessionDates(suggested));
         setMakeActive(!hasActive);
         setIdCardFee('');
+        setOpening({ Cash: '', UPI: '', Bank: '', Cheque: '' });
         setTouched(false);
     }, [open, hasActive, existing]);
 
@@ -389,6 +435,9 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
                                endDate: dates.endDate,
                                feeMonths: months,
                                idCardFee: Number(idCardFee) || 0,
+                               openingBalance: Object.fromEntries(
+                                   Object.entries(opening).map(([k, v]) => [k, Number(v) || 0])
+                               ),
                            })}>
                        {makeActive ? "Create & activate" : "Create"}
                    </Button>
@@ -437,6 +486,27 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
                            onChange={(e) => setIdCardFee(e.target.value)} />
                 </Field>
 
+                {/* Four boxes rather than one, because that is how it is counted:
+                    the drawer and the bank statement are two different questions,
+                    and a single combined figure would have to be split again the
+                    first time anybody reconciled anything. */}
+                <Field label="Opening balance"
+                       hint="what the school already has the day this session starts · leave blank for zero">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {['Cash', 'UPI', 'Bank', 'Cheque'].map((m) => (
+                            <label key={m} className="flex flex-col gap-1">
+                                <span className="font-mono text-[10px] tracking-[0.08em] uppercase text-ink-3">{m}</span>
+                                <Input inputMode="numeric" placeholder="0" value={opening[m]}
+                                       onChange={(e) => setOpening((o) => ({ ...o, [m]: e.target.value }))} />
+                            </label>
+                        ))}
+                    </div>
+                </Field>
+                <p className="-mt-1.5 text-[11.5px] text-ink-3">
+                    This is the figure the Cash Book counts up from. It can be corrected later — every change is
+                    recorded — but it is easiest to enter now, while somebody still remembers what was in the drawer.
+                </p>
+
                 <label className="flex items-start gap-2.5 text-[13px] cursor-pointer">
                     <input type="checkbox" className="mt-0.5 w-4 h-4 accent-brand shrink-0"
                            checked={makeActive} onChange={(e) => setMakeActive(e.target.checked)} />
@@ -458,12 +528,305 @@ function NewSession({ open, onClose, hasActive, existing = [] }) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Correcting a session's opening balance.
+//
+// Its own dialog rather than four boxes inline on the row: this is the figure
+// every number on the Cash Book counts up from, so changing it moves the whole
+// screen. That deserves a deliberate act and a Save button, not an onBlur.
+//
+// Only what actually changed is sent. The service flattens it to dotted paths,
+// so sending one mode cannot wipe the other three — but sending only what moved
+// also keeps the edit history readable.
+// ---------------------------------------------------------------------------
+const MODES = ['Cash', 'UPI', 'Bank', 'Cheque'];
+
+function OpeningBalance({ session, open, onClose }) {
+    const update = useUpdateSession();
+    const [form, setForm] = useState({});
+
+    // Re-seed on every open, so a cancelled edit is genuinely cancelled.
+    useEffect(() => {
+        if (!open || !session) return;
+        setForm(Object.fromEntries(MODES.map((m) => [m, String(session.openingBalance?.[m] ?? 0)])));
+    }, [open, session]);
+
+    if (!open || !session) return null;
+
+    const total = MODES.reduce((sum, m) => sum + (Number(form[m]) || 0), 0);
+    const changed = MODES.filter((m) => (Number(form[m]) || 0) !== (session.openingBalance?.[m] || 0));
+
+    const save = async () => {
+        if (!changed.length) return onClose();
+        await update.mutateAsync({
+            id: session._id,
+            openingBalance: Object.fromEntries(changed.map((m) => [m, Number(form[m]) || 0])),
+        });
+        onClose();
+    };
+
+    return (
+        <Modal open onClose={onClose} title={`Opening balance — ${session.name}`}
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={update.isPending} disabled={!changed.length} onClick={save}>
+                       Save
+                   </Button>
+               </>}>
+            <div className="flex flex-col gap-3">
+                <p className="text-[12.5px] text-ink-2">
+                    What the school had in each place the day this session started. The Cash Book counts up from
+                    these four numbers, so every balance on that screen moves with them.
+                </p>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                    {MODES.map((m) => (
+                        <Field key={m} label={m}>
+                            <Input inputMode="numeric" value={form[m] ?? ''}
+                                   onChange={(e) => setForm((f) => ({ ...f, [m]: e.target.value }))} />
+                        </Field>
+                    ))}
+                </div>
+
+                <div className="flex items-baseline justify-between border-t border-line pt-2.5">
+                    <span className="text-[13px] font-semibold">Opening total</span>
+                    <b className="tnum text-[15px]">{money(total)}</b>
+                </div>
+
+                <p className="text-[11.5px] text-ink-3">
+                    This does not move any money and writes nothing into the cash book — it only says where the
+                    counting starts. The change is recorded against your name.
+                </p>
+            </div>
+        </Modal>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SESSION ROLLOVER — the new year, in three steps.
+//
+// The plan comes FIRST and changes nothing. Promoting a school is the largest
+// thing this app does, and "412 students moved" after the fact is not something
+// anybody can check — so the office sees every class, every headcount and every
+// rupee that is about to move before a single record does.
+//
+// The mapping is a SUGGESTION, never a rule. One year up, same section, worked
+// out from the class order — and then confirmed line by line, because a
+// promotion guessed from a number is exactly how a whole year ends up in the
+// wrong class.
+// ---------------------------------------------------------------------------
+function Rollover({ sessions }) {
+    // Newest first, and the EARLIEST is dropped: a session with nothing before
+    // it cannot be rolled into, so offering it is offering a choice that only
+    // ever answers with an error.
+    const ordered = [...sessions]
+        .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))
+        .slice(0, -1);
+    const [targetId, setTargetId] = useState('');
+    const target = targetId || ordered[0]?._id || '';
+
+    const plan = useRolloverPlan(target);
+    const copyClasses = useRolloverClasses();
+    const promote = useRolloverPromote();
+
+    // { fromClassId: toClassId | '' }. Seeded from the suggestions the moment
+    // the plan arrives, and then owned by the user — re-seeding on every render
+    // would undo their edits under their hands.
+    const [mapping, setMapping] = useState(null);
+    const [seededFor, setSeededFor] = useState(null);
+
+    useEffect(() => {
+        if (!plan.data) return;
+        const key = `${target}|${plan.data.targetClasses.length}`;
+        if (seededFor === key) return;
+        setMapping(Object.fromEntries(
+            plan.data.classes.map((c) => [String(c.fromClassId), c.suggestedClassId ? String(c.suggestedClassId) : ''])
+        ));
+        setSeededFor(key);
+    }, [plan.data, target, seededFor]);
+
+    if (sessions.length < 2) {
+        return (
+            <Card title="Session rollover" hint="at year end">
+                <div className="p-4 text-[12.5px] text-ink-2">
+                    Rollover moves students, their classes and their balances from one session into the next.
+                    It needs two sessions — create next year with <b>+ Session</b> above, and this panel will
+                    show you exactly what would move before anything does.
+                </div>
+            </Card>
+        );
+    }
+
+    const d = plan.data;
+    const mapped = mapping ? Object.values(mapping).filter(Boolean).length : 0;
+    // What the CURRENT mapping would actually move — not what is on the roll.
+    // The tiles above count the whole year; a class left as "finishing" takes
+    // its students and its arrears with it, and saying ₹7,550 will carry when
+    // ₹4,000 of it belongs to a class nobody is promoting would be a number
+    // somebody acts on and then has to explain.
+    const willing = d && mapping ? d.classes.filter((c) => mapping[String(c.fromClassId)]) : [];
+    // `pending`, not `students`. After a partial rollover the ones already on
+    // the new roll must not be counted again, or the button offers to promote
+    // seven children who were promoted an hour ago.
+    const willMove = willing.reduce((a, c) => a + c.pending, 0);
+    const willCarry = willing.reduce((a, c) => a + c.dues, 0);
+    const finishing = d && mapping
+        ? d.classes.filter((c) => !mapping[String(c.fromClassId)]).reduce((a, c) => a + c.students, 0)
+        : 0;
+
+    return (
+        <Card
+            title="Session rollover"
+            hint="at year end"
+            actions={
+                <Select className="w-auto" value={target} onChange={(e) => { setTargetId(e.target.value); setSeededFor(null); }}>
+                    {ordered.map((s) => <option key={s._id} value={s._id}>Into {s.name}</option>)}
+                </Select>
+            }
+        >
+            <div className="p-4 flex flex-col gap-3.5">
+                {plan.isError && (
+                    <div className="bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px]">
+                        {plan.error.message}
+                    </div>
+                )}
+
+                {plan.isPending && <Loading rows={3} />}
+
+                {d && (
+                    <>
+                        <p className="text-[12.5px] text-ink-2">
+                            Moving students from <b className="text-ink">{d.from.name}</b> into{' '}
+                            <b className="text-ink">{d.to.name}</b>. Last year is <b className="text-ink">copied,
+                            never edited</b> — every record stays exactly as it is, which is what keeps a closed
+                            year a record of what actually happened.
+                        </p>
+
+                        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+                            {[['On the roll', num(d.totals.students)],
+                              ['Still to move', num(d.totals.pending)],
+                              ['Arrears on the roll', money(d.totals.dues)],
+                              ['Advance on the roll', money(d.totals.credit)]].map(([k, v]) => (
+                                <div key={k} className="bg-paper-2 border border-line rounded-md px-3 py-2.5">
+                                    <span className="block font-mono text-[9.5px] tracking-[0.1em] uppercase text-ink-3 mb-1">{k}</span>
+                                    <div className="text-[16px] font-semibold tnum">{v}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Step one. Nobody can be promoted into a class that does
+                            not exist, so this comes first and says so. */}
+                        {d.targetClasses.length === 0 ? (
+                            <div className="bg-warn-bg border border-warn rounded-md px-3 py-2.5 text-[12.5px] text-warn flex items-center justify-between gap-3 flex-wrap">
+                                <span><b>{d.to.name} has no classes yet.</b> Copy last year's across — fees included — then map each class below.</span>
+                                <Button size="sm" loading={copyClasses.isPending} onClick={() => copyClasses.mutate(target)}>
+                                    Copy {d.classes.length} classes
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-between gap-3 flex-wrap text-[12.5px] text-ink-2">
+                                <span>{d.to.name} has {d.targetClasses.length} classes.</span>
+                                <Button size="sm" loading={copyClasses.isPending} onClick={() => copyClasses.mutate(target)}>
+                                    Copy any missing
+                                </Button>
+                            </div>
+                        )}
+
+                        {/* Step two. Every line confirmed before anything moves. */}
+                        {d.targetClasses.length > 0 && mapping && (
+                            <>
+                                <Table
+                                    head={['Class', { label: 'Students', align: 'right' }, { label: 'Arrears', align: 'right' }, 'Promotes into']}
+                                    isEmpty={!d.classes.length} empty="No classes in the old session" minWidth={560}
+                                >
+                                    {d.classes.map((c) => {
+                                        const to = mapping[String(c.fromClassId)] || '';
+                                        return (
+                                            <Tr key={c.fromClassId}>
+                                                <Td className="font-semibold whitespace-nowrap">{c.fromClass}</Td>
+                                                <Td align="right">
+                                                    {c.students || '—'}
+                                                    {c.pending !== c.students && (
+                                                        <span className="block text-[11px] text-ink-3">{c.pending} left</span>
+                                                    )}
+                                                </Td>
+                                                <Td align="right" className={c.dues ? 'text-crit' : 'text-ink-3'}>
+                                                    {c.dues ? money(c.dues) : '—'}
+                                                </Td>
+                                                <Td>
+                                                    <Select
+                                                        className="py-1 text-[12px]"
+                                                        value={to}
+                                                        onChange={(e) => setMapping((m) => ({ ...m, [String(c.fromClassId)]: e.target.value }))}
+                                                    >
+                                                        {/* An empty choice is a real decision, not a
+                                                            missing one: these students are finishing. */}
+                                                        <option value="">Finishing — do not promote</option>
+                                                        {d.targetClasses.map((t) => (
+                                                            <option key={t.id} value={t.id}>{t.label}</option>
+                                                        ))}
+                                                    </Select>
+                                                </Td>
+                                            </Tr>
+                                        );
+                                    })}
+                                </Table>
+
+                                <div className="bg-paper-2 border border-line rounded-md px-3 py-2.5 text-[12.5px] text-ink-2 flex flex-col gap-1.5">
+                                    <b className="text-ink">What moves with them</b>
+                                    <span>· The <b className="text-ink">same admission number</b> — it is who the child is to the school.</span>
+                                    <span>· Unpaid fees, uniform and other charges become one <b className="text-ink">arrears charge</b> in the new year, collectible like any other.</span>
+                                    <span>· An <b className="text-ink">advance</b> the school is holding carries over — a parent who paid in March bought April.</span>
+                                    <span>· The monthly fee comes from the <b className="text-ink">new class</b>, so a concession is re-decided rather than inherited.</span>
+                                    <span>· The ID card and transfer certificate <b className="text-ink">reset</b> — those are facts about one year.</span>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3 flex-wrap">
+                                    <span className="text-[12.5px] text-ink-3">
+                                        {mapped} of {d.classes.length} classes mapped · {willMove} students would move
+                                        {willCarry > 0 && ` · ${money(willCarry)} arrears carried`}
+                                        {finishing > 0 && ` · ${finishing} finishing`}
+                                    </span>
+                                    <Button
+                                        variant="primary"
+                                        loading={promote.isPending}
+                                        disabled={!mapped || willMove === 0}
+                                        onClick={() => promote.mutate({ id: target, mapping })}
+                                    >
+                                        {willMove === 0 ? 'Nothing left to promote' : `Promote ${willMove} students`}
+                                    </Button>
+                                </div>
+
+                                {willMove === 0 && mapped > 0 && (
+                                    <p className="text-[11.5px] text-ink-3">
+                                        Everyone in the mapped classes is already in {d.to.name}. Running it again moves
+                                        nobody and charges nobody twice — there is simply nothing left to do.
+                                    </p>
+                                )}
+
+                                {!d.to.isActive && d.totals.pending === 0 && (
+                                    <div className="bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px]">
+                                        <b>One step left:</b> activate {d.to.name} above. Until then every screen still
+                                        reads {d.from.name}, and a new admission into a {d.to.name} class is refused.
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </>
+                )}
+            </div>
+        </Card>
+    );
+}
+
 function SessionTab() {
     const sessions = useSessions();
     const active = useActiveSession();
     const activate = useActivateSession();
     const updateSession = useUpdateSession();
     const [adding, setAdding] = useState(false);
+    // The session whose opening balance is being corrected. null = closed.
+    const [openingFor, setOpeningFor] = useState(null);
 
     const list = sessions.data || [];
     // active.isError means the backend answered NO_ACTIVE_SESSION — the state
@@ -492,7 +855,8 @@ function SessionTab() {
                 <Async query={sessions}>
                     {() => (
                         <Table head={['Session', 'Starts', 'Ends', { label: 'Fee months', align: 'right' },
-                                      { label: 'ID card fee', align: 'right' }, 'Status', '']}
+                                      { label: 'ID card fee', align: 'right' },
+                                      { label: 'Opening balance', align: 'right' }, 'Status', '']}
                                isEmpty={!list.length}
                                empty="No sessions yet — use + Session to create the first one"
                                minWidth={560}>
@@ -513,6 +877,17 @@ function SessionTab() {
                                                    if (v !== (s.idCardFee || 0)) updateSession.mutate({ id: s._id, idCardFee: v });
                                                }} />
                                     </Td>
+                                    <Td align="right">
+                                        {/* A button rather than four boxes on the row —
+                                            this is what the whole Cash Book counts up from. */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setOpeningFor(s)}
+                                            className="tnum text-[12.5px] underline underline-offset-2 decoration-dotted hover:text-brand"
+                                        >
+                                            {money(MODES.reduce((sum, m) => sum + (s.openingBalance?.[m] || 0), 0))}
+                                        </button>
+                                    </Td>
                                     <Td>{s.isActive ? <Pill tone="ok">Active</Pill> : <Pill>Closed</Pill>}</Td>
                                     <Td>
                                         {!s.isActive && (
@@ -528,20 +903,9 @@ function SessionTab() {
                 </Async>
             </Card>
 
-            <Card title="Session rollover" hint="at year end">
-                <div className="p-4 text-[12.5px] text-ink-2 flex flex-col gap-2.5">
-                    <p>The Admin runs this manually — it never happens automatically:</p>
-                    <ol className="list-decimal pl-5 space-y-1">
-                        <li>Create the new session and activate it</li>
-                        <li>Create the new classes (or copy the old ones)</li>
-                        <li>Promote students to the next class</li>
-                        <li>Carry forward any outstanding balances</li>
-                    </ol>
-                    <div className="bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 mt-1">
-                        The previous session's data stays exactly as it was — readable, never editable.
-                    </div>
-                </div>
-            </Card>
+            <Rollover sessions={list} />
+
+            <OpeningBalance session={openingFor} open={Boolean(openingFor)} onClose={() => setOpeningFor(null)} />
 
             <NewSession open={adding} onClose={() => setAdding(false)}
                         hasActive={hasActive} existing={list} />

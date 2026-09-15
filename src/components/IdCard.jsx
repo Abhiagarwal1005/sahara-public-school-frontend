@@ -128,7 +128,8 @@ export function IdCardAction({ student, size = 'sm' }) {
                 consequence={
                     student.idCard?.amount > 0
                         ? 'The student goes back to "not taken". The money is not deleted — an opposing entry '
-                          + 'is written into the day book, and the collection figure comes back down.'
+                          + 'is written into the day book, and the collection figure comes back down. If that '
+                          + 'payment has already been verified this is refused: take the verification off first.'
                         : 'The student goes back to "not taken". Nothing was collected, so the cash book is untouched.'
                 }
                 confirmLabel="Cancel card"

@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useDashboard, useFeeTrend, useFeeSummary, useDaybook, useActiveSession } from '../hooks/queries';
-import { money, num, monthLabel, monthShort, currentMonthKey, percent, time, axisLabel } from '../lib/format';
+import { money, num, monthLabel, monthShort, currentMonthKey, percent, time, toInputDate, axisLabel } from '../lib/format';
 import {
     Card, StatTile, Table, Tr, Td, Pill, Meter, Async, PageTitle, EmptyState, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
+import { useAuth } from '../store/auth';
 
 // ---------------------------------------------------------------------------
 // Fee collection chart.
@@ -78,32 +80,93 @@ function FeeTrend({ data }) {
     );
 }
 
+// What each period is called, in one place. The server sends the DATES and the
+// period's name; naming it is the screen's job, because the frontend already
+// owns month naming and a second list of month names on the server would be a
+// second place for it to be wrong.
+const PERIODS = [
+    { value: 'today', label: 'Today' },
+    { value: 'week', label: '7 days' },
+    { value: 'month', label: 'This month' },
+];
+
 export default function Dashboard() {
-    const dash = useDashboard();
+    const can = useAuth((s) => s.can);
+    // The month, as it always was. Today and the last seven days are the two
+    // questions somebody actually walks in with — "did this morning go well",
+    // "how was the week" — and neither could be asked from this screen before.
+    const [period, setPeriod] = useState('month');
+    const dash = useDashboard(period);
     const trend = useFeeTrend();
     // Read, never hardcoded — otherwise the header still says last year after
     // the session rollover.
     const session = useActiveSession();
     const month = currentMonthKey();
-    const summary = useFeeSummary(month);
-    const daybook = useDaybook(undefined);
+
+    // -----------------------------------------------------------------------
+    // The page is gated on `report.dashboard`, but these two panels are not the
+    // dashboard — they are the class-wise fee report and the day book, each with
+    // a permission of its own.
+    //
+    // They used to fire regardless. The Accountant ships WITHOUT `report.fee`,
+    // so every Accountant opened the dashboard to a card containing a 403 —
+    // every single day, on the first screen of the app.
+    // -----------------------------------------------------------------------
+    const canFeeReport = can('report.fee');
+    const canDaybook = can('report.daybook');
+
+    const summary = useFeeSummary(canFeeReport ? month : null);
+    // Follows the period too — it is a day book, and "what came in this week"
+    // is the same question the tiles above it are answering.
+    const daybook = useDaybook(
+        dash.data ? { from: toInputDate(dash.data.from), to: toInputDate(dash.data.to) } : undefined,
+        { enabled: canDaybook && Boolean(dash.data) }
+    );
+
+    // Long and short, because the tiles are tight and the header is not.
+    const periodName = period === 'month' ? monthLabel(month) : PERIODS.find((p) => p.value === period).label;
+    const periodShort = period === 'month' ? monthShort(month) : period === 'today' ? 'today' : '7 days';
 
     return (
         <>
             <PageTitle
                 title="Dashboard"
-                sub={`${monthLabel(month)}${session.data?.name ? ` · Session ${session.data.name}` : ''}`}
-            />
+                sub={`${periodName}${session.data?.name ? ` · Session ${session.data.name}` : ''}`}
+            >
+                {/* Only the MONEY tiles follow this. The outstanding, vendor and
+                    advance figures below are balances — what is owed is owed
+                    whatever period is showing — which is why those tiles carry no
+                    period in their label and these ones do. */}
+                <div className="flex border border-line-2 rounded-md overflow-hidden w-max">
+                    {PERIODS.map((p) => (
+                        <button key={p.value} onClick={() => setPeriod(p.value)}
+                                className={cx(
+                                    'px-3 py-1.5 text-[12.5px] border-r border-line-2 last:border-r-0',
+                                    period === p.value ? 'bg-brand text-white font-semibold' : 'bg-paper-2 text-ink-2 hover:bg-white'
+                                )}>
+                            {p.label}
+                        </button>
+                    ))}
+                </div>
+            </PageTitle>
 
             <Async query={dash}>
                 {(d) => (
                     <>
                         <div className="grid gap-3 grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(178px,1fr))]">
+                            {/* The meter and the "% of expected" line only exist
+                                for a month. A fee demand is raised per month, so
+                                there is no such thing as "expected today" — and a
+                                collection rate against an invented denominator
+                                would read as a fact. Outside a month the tile says
+                                what came in and stops. */}
                             <StatTile
-                                label={`Collected — ${monthShort(month)}`}
+                                label={`Collected — ${periodShort}`}
                                 value={money(d.fees.collected)}
-                                sub={`${d.fees.rate}% of ${money(d.fees.expected)} expected`}
-                                meter={d.fees.rate}
+                                sub={d.fees.rate === null
+                                    ? (d.otherFees?.collected > 0 ? `plus ${money(d.otherFees.collected)} other fees` : 'monthly fees')
+                                    : `${d.fees.rate}% of ${money(d.fees.expected)} expected`}
+                                meter={d.fees.rate === null ? undefined : d.fees.rate}
                                 tone={d.fees.rate < 70 ? 'crit' : d.fees.rate < 85 ? 'warn' : 'brand'}
                             />
                             <StatTile
@@ -117,17 +180,30 @@ export default function Dashboard() {
                                 sub={`${d.vendors.count} vendors`}
                             />
                             <StatTile
-                                label={`Expenses — ${monthShort(month)}`}
+                                label={`Expenses — ${periodShort}`}
                                 value={money(d.spend.expenses)}
                                 sub={`purchases ${money(d.spend.purchases)}`}
                             />
+                            {/* Fee collected for months that have not been billed
+                                yet. It points the other way from every other tile
+                                here — money in the bank that is not income — and
+                                the question "how much of this is really ours" is
+                                asked at the end of every term. Only shown once
+                                somebody has actually paid ahead. */}
+                            {d.advanceHeld > 0 && (
+                                <StatTile
+                                    label="Advance held"
+                                    value={money(d.advanceHeld)}
+                                    sub="paid for months not yet raised"
+                                />
+                            )}
                             {/* Only once there is something to show — an ID card line
                                 reading ₹0 all year is a tile earning no space. */}
                             {d.idCards?.collected > 0 && (
                                 <StatTile
-                                    label={`ID cards — ${monthShort(month)}`}
+                                    label={`ID cards — ${periodShort}`}
                                     value={money(d.idCards.collected)}
-                                    sub="collected this month"
+                                    sub={`collected ${period === 'month' ? 'this month' : period === 'today' ? 'today' : 'in 7 days'}`}
                                 />
                             )}
                         </div>
@@ -175,7 +251,15 @@ export default function Dashboard() {
                         </div>
 
                         <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr] items-start">
-                            <Card title={`Class-wise collection — ${monthShort(month)}`} hint="expected vs collected">
+                            {/* Always the MONTH, whatever the toggle says — this is
+                                an expected-vs-collected report and a demand is
+                                raised per month. The hint says so out loud when the
+                                rest of the screen is showing something shorter,
+                                rather than leaving it looking like a filter that
+                                failed to apply. */}
+                            {canFeeReport && (
+                            <Card title={`Class-wise collection — ${monthShort(month)}`}
+                                  hint={period === 'month' ? 'expected vs collected' : 'expected vs collected · always this month'}>
                                 <Async query={summary} rows={4}>
                                     {(s) => (
                                         <Table
@@ -204,12 +288,18 @@ export default function Dashboard() {
                                     )}
                                 </Async>
                             </Card>
+                            )}
 
-                            <Card title="Today" hint="day book">
+                            {canDaybook && (
+                            <Card title={periodName} hint="day book">
                                 <Async query={daybook} rows={4}>
                                     {(db) => (
                                         <div className="flex flex-col">
-                                            {db.rows.slice(0, 6).map((t) => (
+                                            {/* The six most recent, newest first. The day
+                                                book comes back oldest-first (it is a
+                                                register), so taking the first six of a
+                                                month showed the 1st and nothing since. */}
+                                            {db.rows.slice(-6).reverse().map((t) => (
                                                 <div key={t._id} className="flex items-center gap-3 px-4 py-2.5 border-b border-line">
                                                     <div className="flex-1 min-w-0">
                                                         <b className="block text-[13px] font-semibold truncate">
@@ -225,11 +315,11 @@ export default function Dashboard() {
                                                     </span>
                                                 </div>
                                             ))}
-                                            {!db.rows.length && <EmptyState>No entries today</EmptyState>}
+                                            {!db.rows.length && <EmptyState>{period === 'today' ? 'No entries today' : 'No entries in this period'}</EmptyState>}
                                             {db.rows.length > 0 && (
                                                 <div className="flex items-center gap-3 px-4 py-2.5 bg-paper-2">
                                                     <div className="flex-1">
-                                                        <b className="block text-[13px] font-semibold">Net today</b>
+                                                        <b className="block text-[13px] font-semibold">Net · {periodName}</b>
                                                         <span className="block text-[11.5px] text-ink-3 font-mono">
                                                             cash {money(db.totals.netCash)}
                                                         </span>
@@ -243,6 +333,7 @@ export default function Dashboard() {
                                     )}
                                 </Async>
                             </Card>
+                            )}
                         </div>
                     </>
                 )}

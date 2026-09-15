@@ -17,7 +17,8 @@ const QUALITY = 0.82;
 
 const compress = (file) =>
     new Promise((resolve, reject) => {
-        // Send PDFs and non-images through untouched
+        // Anything that is not an image goes through untouched. The picker only
+        // offers images, so this is a guard against a drag-and-drop, not a path.
         if (!file.type.startsWith('image/')) return resolve(file);
 
         const img = new Image();

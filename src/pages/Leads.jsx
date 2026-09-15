@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
     useLeads, useLead, useLeadSummary, useCreateLead, useLogFollowUp, useDeleteLead, useClasses,
-    useUpdateLead,
+    useUpdateLead, useLeadsByPhone,
 } from '../hooks/queries';
 import { date, dateShort, toInputDate } from '../lib/format';
 import {
@@ -87,6 +87,18 @@ function AddLead({ open, onClose }) {
     const set = (patch) => setForm((f) => ({ ...f, ...patch }));
     const phoneOk = /^[6-9]\d{9}$/.test(form.phone);
 
+    // -----------------------------------------------------------------------
+    // "This number has rung before."
+    //
+    // GET /leads/by-phone has existed from the start with nothing calling it.
+    // It is deliberately NOT a block — one family enquires about two children,
+    // and refusing that would be wrong. It is a warning shown the moment the
+    // tenth digit is typed, so the desk sees the earlier enquiry before typing
+    // the whole form again.
+    // -----------------------------------------------------------------------
+    const existing = useLeadsByPhone(phoneOk ? form.phone : '');
+    const earlier = existing.data || [];
+
     return (
         <Modal open={open} onClose={onClose} title="New enquiry" wide
                footer={<>
@@ -124,6 +136,29 @@ function AddLead({ open, onClose }) {
                     <Input inputMode="numeric" maxLength={10} value={form.altPhone}
                            onChange={(e) => set({ altPhone: e.target.value.replace(/\D/g, '') })} />
                 </Field>
+
+                {earlier.length > 0 && (
+                    <div className="sm:col-span-2 bg-warn-bg border border-warn rounded-md px-3 py-2.5">
+                        <p className="text-[12.5px] text-warn font-semibold">
+                            This number has enquired before — {earlier.length}{' '}
+                            {earlier.length > 1 ? 'earlier enquiries' : 'earlier enquiry'}
+                        </p>
+                        <div className="mt-1.5 flex flex-col gap-1">
+                            {earlier.map((l) => (
+                                <span key={l._id} className="text-[12px] text-ink-2">
+                                    <b>{l.name}</b>
+                                    {l.guardianName ? ` · ${l.guardianName}` : ''}
+                                    {' · '}<span className="font-mono">{l.status}</span>
+                                    {' · '}{dateShort(l.createdAt)}
+                                </span>
+                            ))}
+                        </div>
+                        <p className="mt-1.5 text-[11.5px] text-ink-3">
+                            Saving anyway is fine — one family often enquires about two children.
+                        </p>
+                    </div>
+                )}
+
                 <Field label="Class interested in"
                        hint="Pick one, or type anything — it is saved as plain text">
                     <Input list="lead-classes" value={form.classInterested}

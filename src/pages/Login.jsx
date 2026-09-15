@@ -121,7 +121,8 @@ export default function Login() {
                     <>
                         <h1 className="text-[19px] font-semibold">Set a new password</h1>
                         <p className="text-[13px] text-ink-3 mt-1 mb-5">
-                            {user?.name} — the temporary password only works once.
+                            {user?.name} — choose a password before you go on. The temporary one keeps
+                            working until you do, so it should not be left in place.
                         </p>
 
                         <form onSubmit={changePassword} className="flex flex-col gap-3">

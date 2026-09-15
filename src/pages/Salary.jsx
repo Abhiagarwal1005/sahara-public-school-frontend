@@ -4,7 +4,9 @@ import {
     useAddAdjustment, useRemoveAdjustment,
     useActiveSession,
 } from '../hooks/queries';
-import { money, moneyExact, num, monthLabel, currentMonthKey, monthOptions, date, amountInWords } from '../lib/format';
+import {
+    money, moneyExact, num, monthLabel, currentMonthKey, monthOptions, date, amountInWords, sessionMonths,
+} from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Select, Field, Toolbar, Spacer, Modal,
     Async, PageTitle, Tabs, statusPill, EmptyState, cx,
@@ -34,6 +36,13 @@ function SlipDetail({ slip: row, onClose }) {
 
     const remaining = slip.netPayable - slip.paidAmount;
     const isDraft = slip.status === 'Draft';
+
+    // What the printed acknowledgement declares was received, and what is still
+    // owed after it. A slip that has been paid something acknowledges THAT
+    // figure, not the net payable — those differ on a partial payment, and the
+    // teacher must not sign for money they did not get.
+    const acknowledged = slip.paidAmount || 0;
+    const balance = Math.max(0, remaining);
 
     const monthDays = slip.monthDays ?? slip.workingDays;
     const sundayDays = slip.sundayDays ?? 0;
@@ -452,12 +461,111 @@ function SlipDetail({ slip: row, onClose }) {
                     </p>
                 )}
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, marginTop: 54, fontSize: '11px' }}>
-                    <span style={{ borderTop: '1px solid #000', paddingTop: 4, width: '38%' }}>
-                        Received by: {slip.teacherName}
-                    </span>
+                {/* -------------------------------------------------------------
+                    ACKNOWLEDGEMENT — the half the teacher signs.
+                    
+                    This used to be a bare "Received by: <name>" rule, which is a
+                    label, not a receipt: it says who the slip belongs to and
+                    nothing about what was handed over or agreed.
+                    
+                    The amount is written in FIGURES AND WORDS, because that is
+                    what makes a signed figure hard to alter afterwards, and the
+                    declaration names what is being agreed to — the attendance and
+                    the arithmetic above it — since those are what a teacher
+                    actually disputes a month later.
+                    
+                    On an UNPAID slip the amount is left as a rule to be filled in
+                    at the counter. Printing "Received ₹21,774" on a slip nobody
+                    has been paid for produces a pre-signed receipt for money that
+                    has not moved, which is precisely the document this section
+                    exists to make unnecessary.
+                    ------------------------------------------------------------- */}
+                <div
+                    style={{
+                        marginTop: 16,
+                        border: '1px solid #999',
+                        // Never split a declaration across two pages — half a
+                        // receipt with a signature under it is not a receipt.
+                        pageBreakInside: 'avoid',
+                        breakInside: 'avoid',
+                    }}
+                >
+                    <div
+                        style={{
+                            padding: '5px 8px',
+                            background: '#f0efec',
+                            borderBottom: '1px solid #999',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.06em',
+                        }}
+                    >
+                        Acknowledgement
+                    </div>
+
+                    <div style={{ padding: '9px 10px', fontSize: '11.5px', lineHeight: 1.6 }}>
+                        <p style={{ margin: 0 }}>
+                            Received from <b>Sahara Public School</b> the sum of{' '}
+                            {acknowledged > 0 ? (
+                                <>
+                                    <b>{moneyExact(acknowledged)}</b> ({amountInWords(acknowledged)})
+                                </>
+                            ) : (
+                                <b style={{ borderBottom: '1px solid #000', paddingBottom: 1 }}>
+                                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                                </b>
+                            )}{' '}
+                            towards my salary for <b>{monthLabel(slip.month)}</b>.
+                        </p>
+
+                        <p style={{ margin: '5px 0 0' }}>
+                            I have checked the attendance and the amounts set out above and confirm they
+                            are correct. I have no further claim against the school in respect of this
+                            month.
+                        </p>
+
+                        {balance > 0 && (
+                            <p style={{ margin: '5px 0 0', fontWeight: 700 }}>
+                                A balance of {moneyExact(balance)} remains payable for this month and is
+                                not covered by this acknowledgement.
+                            </p>
+                        )}
+
+                        {!acknowledged && (
+                            <p style={{ margin: '5px 0 0', fontStyle: 'italic', color: '#444' }}>
+                                To be completed and signed when the salary is handed over.
+                            </p>
+                        )}
+
+                        <div
+                            style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                gap: 30,
+                                marginTop: 40,
+                                fontSize: '11px',
+                            }}
+                        >
+                            <span style={{ borderTop: '1px solid #000', paddingTop: 4, width: '30%' }}>
+                                Date
+                            </span>
+                            <span style={{ borderTop: '1px solid #000', paddingTop: 4, width: '46%' }}>
+                                Signature
+                                <b style={{ display: 'block', fontWeight: 700 }}>
+                                    {slip.teacherName}
+                                    {slip.designation ? ` \u00b7 ${slip.designation}` : ''}
+                                </b>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* The school's own side of the same page. */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 34, fontSize: '11px' }}>
                     <span style={{ borderTop: '1px solid #000', paddingTop: 4, width: '38%', textAlign: 'right' }}>
-                        Authorised signature
+                        For Sahara Public School
+                        <b style={{ display: 'block', fontWeight: 700 }}>Authorised signatory</b>
                     </span>
                 </div>
             </div>
@@ -537,7 +645,14 @@ export default function Salary() {
     const session = useActiveSession();
     const [tab, setTab] = useState('slips');
     const [month, setMonth] = useState(currentMonthKey());
-    const months = monthOptions(session.data?.feeMonths?.length ? session.data.feeMonths : [currentMonthKey()]);
+
+    // All twelve months of the session, NOT feeMonths. Staff are paid every
+    // month; fees are raised in some of them. A school billing April–January
+    // could not open February or March here at all — the months were simply
+    // missing from the dropdown, so those slips could never be generated.
+    const months = monthOptions([
+        ...new Set([...sessionMonths(session.data?.name), currentMonthKey(), month]),
+    ]);
 
     return (
         <>

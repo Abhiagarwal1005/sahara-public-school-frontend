@@ -92,7 +92,11 @@ export function ImageUpload({ value = [], onChange, folder = 'bills', max = 5, l
                 <input
                     ref={inputRef}
                     type="file"
-                    accept="image/*,application/pdf"
+                    // Images only. A PDF uploaded fine and was then undisplayable:
+                    // every viewer in the app builds a Cloudinary /image/upload URL,
+                    // which does not render one. A photo of the bill is what the
+                    // office takes anyway.
+                    accept="image/*"
                     multiple
                     capture="environment"
                     className="hidden"

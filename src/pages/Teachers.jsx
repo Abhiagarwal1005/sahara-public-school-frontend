@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useTeachers, useCreateTeacher, useUpdateTeacher } from '../hooks/queries';
+import { useTeachers, useCreateTeacher, useUpdateTeacher, useMarkTeacherLeft } from '../hooks/queries';
 import { money, date, toInputDate } from '../lib/format';
 import {
     Card, Table, Tr, Td, Button, Input, Field, Toolbar, Spacer, Modal,
@@ -130,14 +130,76 @@ function EditTeacher({ teacher, onClose }) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Somebody resigns.
+//
+// This is what takes a teacher off the attendance sheet and out of next month's
+// salary run — both read `status: 'Active'`. The route and `teacher.manage` have
+// existed from the start with no button behind them, so a teacher who left in
+// April was still on the register in November, and a slip was generated for them
+// every month.
+//
+// A Left teacher can be brought back (Rejoin below) — the status is a flag, not
+// a deletion, and their whole history stays exactly where it is.
+// ---------------------------------------------------------------------------
+function MarkLeft({ teacher, onClose }) {
+    const markLeft = useMarkTeacherLeft();
+    if (!teacher) return null;
+
+    return (
+        <Modal open onClose={onClose} title={`Mark ${teacher.name} as left?`}
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="danger" loading={markLeft.isPending}
+                           onClick={async () => { await markLeft.mutateAsync(teacher._id); onClose(); }}>
+                       Yes, mark as Left
+                   </Button>
+               </>}>
+            <p className="text-[13px] text-ink-2">
+                <b>{teacher.name}</b> ({teacher.employeeCode}) comes off the attendance sheet and out of
+                next month's salary generation.
+            </p>
+            <p className="mt-3 text-[12.5px] text-ink-2">
+                Slips already generated are untouched, and attendance already marked stays exactly as
+                it is — a slip and a register are both records of what happened.
+            </p>
+            <div className="mt-3 bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px]">
+                Any salary still unpaid stays on the Salary screen. Marking somebody as left does not
+                pay them, and does not cancel what is owed.
+            </div>
+        </Modal>
+    );
+}
+
 export function TeachersList() {
-    const list = useTeachers();
+    // 'Active' | 'Left' — a left teacher is not gone, just off the register.
+    //
+    // Declared BEFORE the query that filters on it. `const` is not hoisted the
+    // way `var` is: reading it above its own declaration is a temporal dead
+    // zone, which throws on every single render and takes the whole page blank
+    // rather than failing in one corner of it.
+    const [status, setStatus] = useState('Active');
+
+    const list = useTeachers({ status });
+    const update = useUpdateTeacher();
     const [adding, setAdding] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [leaving, setLeaving] = useState(null);
 
     return (
         <>
             <Toolbar>
+                <div className="flex border border-line-2 rounded-md overflow-hidden w-max">
+                    {['Active', 'Left'].map((s) => (
+                        <button key={s} onClick={() => setStatus(s)}
+                                className={
+                                    'px-4 py-1.5 text-[12.5px] border-r border-line-2 last:border-r-0 '
+                                    + (status === s ? 'bg-brand text-white font-semibold' : 'bg-paper-2 text-ink-2 hover:bg-white')
+                                }>
+                            {s}
+                        </button>
+                    ))}
+                </div>
                 <Spacer />
                 <Can perm="teacher.manage"><Button variant="primary" onClick={() => setAdding(true)}>+ Teacher</Button></Can>
             </Toolbar>
@@ -147,7 +209,9 @@ export function TeachersList() {
                     {(d) => (
                         <Table head={['Code', 'Name', 'Designation', 'Phone', { label: 'Monthly salary', align: 'right' },
                                       { label: 'Late allowed', align: 'right' }, 'Joined', 'Status', '']}
-                               isEmpty={!d.length} empty="No teachers yet" minWidth={860}>
+                               isEmpty={!d.length}
+                               empty={status === 'Left' ? 'Nobody has left' : 'No teachers yet'}
+                               minWidth={860}>
                             {d.map((t) => (
                                 <Tr key={t._id}>
                                     <Td className="font-mono text-[11.5px] text-ink-3">{t.employeeCode}</Td>
@@ -162,9 +226,24 @@ export function TeachersList() {
                                     <Td>{statusPill(t.status)}</Td>
                                     <Td>
                                         <Can perm="teacher.manage">
-                                            {t.status === 'Active' && (
-                                                <Button size="sm" onClick={() => setEditing(t)}>Edit</Button>
-                                            )}
+                                            <span className="inline-flex gap-1.5">
+                                                {t.status === 'Active' ? (
+                                                    <>
+                                                        <Button size="sm" onClick={() => setEditing(t)}>Edit</Button>
+                                                        <Button size="sm" variant="danger" onClick={() => setLeaving(t)}>
+                                                            Mark left
+                                                        </Button>
+                                                    </>
+                                                ) : (
+                                                    /* Back on the register: the attendance sheet and the
+                                                       next salary run both read status, so this is all it
+                                                       takes. Their history was never removed. */
+                                                    <Button size="sm" loading={update.isPending}
+                                                            onClick={() => update.mutate({ id: t._id, status: 'Active' })}>
+                                                        Rejoin
+                                                    </Button>
+                                                )}
+                                            </span>
                                         </Can>
                                     </Td>
                                 </Tr>
@@ -176,6 +255,7 @@ export function TeachersList() {
 
             <AddTeacher open={adding} onClose={() => setAdding(false)} />
             <EditTeacher teacher={editing} onClose={() => setEditing(null)} />
+            <MarkLeft teacher={leaving} onClose={() => setLeaving(null)} />
 
             {/* One teacher's trail, opened from the row being edited. Salary
                 changes are the reason this panel exists. */}

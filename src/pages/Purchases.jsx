@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     usePurchases, useVendors, useCreatePurchase, useCreateVendor, usePayVendor,
-    useVendorStatement, useAgeing, useStockItems,
+    useVendorStatement, useAgeing, useStockItems, useUpdatePurchase, useUpdateVendor,
+    useVendorPayments,
 } from '../hooks/queries';
 import { money, num, date, toInputDate } from '../lib/format';
 import {
@@ -14,10 +15,90 @@ import { BillView } from '../components/BillView';
 import { Can } from '../components/Can';
 import { useAuth } from '../store/auth';
 
+// ---------------------------------------------------------------------------
+// Editing a bill.
+//
+// The lines and the amounts are FROZEN — the server refuses them, because the
+// stock movements and the vendor's outstanding were both written from them. A
+// wrong bill is corrected with a correction entry, not by editing this one.
+//
+// The date IS editable, and it is not a cosmetic change: a bill's value sits
+// under its month's purchases figure, so moving the date moves the value too
+// (the server does that in the same transaction). Worth saying on the screen.
+// ---------------------------------------------------------------------------
+function EditBill({ bill, onClose }) {
+    const update = useUpdatePurchase();
+    const [form, setForm] = useState(null);
+    const [images, setImages] = useState([]);
+
+    useEffect(() => {
+        if (!bill) return setForm(null);
+        setForm({ billDate: toInputDate(bill.billDate), note: bill.note || '' });
+        setImages(bill.billImage?.publicId ? [bill.billImage] : []);
+    }, [bill]);
+
+    if (!bill || !form) return null;
+
+    const dateChanged = form.billDate !== toInputDate(bill.billDate);
+    const imageChanged = (images[0]?.publicId || '') !== (bill.billImage?.publicId || '');
+
+    const save = async () => {
+        const body = { id: bill._id };
+        if (dateChanged) body.billDate = form.billDate;
+        if (form.note.trim() !== (bill.note || '')) body.note = form.note.trim();
+        if (imageChanged && images[0]) body.billImage = images[0];
+
+        if (Object.keys(body).length === 1) return onClose();
+        await update.mutateAsync(body);
+        onClose();
+    };
+
+    return (
+        <Modal open onClose={onClose} title={`Bill ${bill.billNo} — ${bill.vendorName}`} wide
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={update.isPending} onClick={save}>Save</Button>
+               </>}>
+            <div className="flex flex-col gap-3">
+                <div className="flex items-baseline justify-between pb-3 border-b border-line">
+                    <span className="text-[12px] text-ink-3">
+                        {money(bill.paidAmount)} paid · {money(bill.dueAmount)} due
+                    </span>
+                    <span className="text-[20px] font-semibold tnum">{money(bill.total)}</span>
+                </div>
+
+                <Field label="Bill date">
+                    <Input type="date" value={form.billDate}
+                           onChange={(e) => setForm({ ...form, billDate: e.target.value })} />
+                </Field>
+                <Field label="Note">
+                    <Input value={form.note} placeholder="Delivered short, balance next week…"
+                           onChange={(e) => setForm({ ...form, note: e.target.value })} />
+                </Field>
+
+                <ImageUpload label="Bill photo" value={images} onChange={setImages} folder="bills" max={1} />
+
+                {dateChanged && (
+                    <div className="bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px]">
+                        Moving the date moves this bill's {money(bill.total)} between months on the
+                        income-vs-expense report. Both months are corrected together.
+                    </div>
+                )}
+
+                <div className="bg-paper-2 border border-line rounded-md px-3 py-2.5 text-[12.5px] text-ink-2">
+                    The items and the amounts cannot be changed — stock came in against them and the
+                    vendor's outstanding was built from them. For a wrong bill, enter a correction bill.
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 // ---- bills list ----
 function Bills() {
     const [status, setStatus] = useState('');
     const [page, setPage] = useState(1);
+    const [editing, setEditing] = useState(null);
     const list = usePurchases({ status: status || undefined, page, limit: 20 });
 
     return (
@@ -36,8 +117,8 @@ function Bills() {
                     {(d) => (
                         <>
                         <Table head={['Bill', { label: 'Vendor', primary: true }, 'Date', { label: 'Total', align: 'right' },
-                                      { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, 'Status', 'Bill']}
-                               isEmpty={!d.items.length} empty="No purchases recorded yet" minWidth={760}>
+                                      { label: 'Paid', align: 'right' }, { label: 'Due', align: 'right' }, 'Status', 'Bill', '']}
+                               isEmpty={!d.items.length} empty="No purchases recorded yet" minWidth={820}>
                             {d.items.map((p) => (
                                 <Tr key={p._id}>
                                     <Td className="font-mono text-[11.5px]">{p.billNo}</Td>
@@ -50,6 +131,14 @@ function Bills() {
                                     {/* Was a plain "Photo" pill — it said a bill existed but
                                         gave no way to look at it. */}
                                     <Td><BillView images={[p.billImage]} title={`Bill ${p.billNo}`} /></Td>
+                                    <Td>
+                                        {/* Note, photo and date only — `purchase.edit` has been a
+                                            switch in Settings from the start with no button
+                                            behind it. */}
+                                        <Can perm="purchase.edit">
+                                            <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>
+                                        </Can>
+                                    </Td>
                                 </Tr>
                             ))}
                         </Table>
@@ -60,6 +149,8 @@ function Bills() {
                     )}
                 </Async>
             </Card>
+
+            <EditBill bill={editing} onClose={() => setEditing(null)} />
         </>
     );
 }
@@ -199,6 +290,13 @@ function NewPurchase({ onDone }) {
                         </Select>
                     </Field>
 
+                    {/* `note` was in this form's state from the start with no input
+                        behind it, so every bill was saved with an empty one. */}
+                    <Field label="Note" hint="optional">
+                        <Input value={form.note} placeholder="Delivered short, balance next week…"
+                               onChange={(e) => setForm({ ...form, note: e.target.value })} />
+                    </Field>
+
                     {due > 0 && (
                         <div className="bg-warn-bg border border-warn text-warn rounded-md px-3 py-2.5 text-[12.5px]">
                             {money(due)} will be added to this vendor's outstanding.
@@ -208,7 +306,10 @@ function NewPurchase({ onDone }) {
                     {/* Attachment sits after the payment fields, not above them: the
                         bill is recorded whether or not anyone photographs it, and
                         putting the drop zone first made it look compulsory. */}
-                    <ImageUpload label="Bill photo" value={images} onChange={setImages} folder="bills" max={3} />
+                    {/* max 1, because a Purchase stores ONE billImage. It used to
+                        accept three and send images[0] — the other two were uploaded
+                        to Cloudinary, referenced by nothing, and never cleaned up. */}
+                    <ImageUpload label="Bill photo" value={images} onChange={setImages} folder="bills" max={1} />
 
                     <Button variant="primary" className="justify-center" loading={create.isPending}
                             disabled={!form.vendorId || !form.billNo.trim() || !lines.length}
@@ -353,10 +454,67 @@ function PayModal({ vendor, onClose }) {
     );
 }
 
+// Editing a vendor. Only the details — the three balances are refused by the
+// server, because they move through purchases and payments and nowhere else.
+// `vendor.manage` has covered both adding and editing from the start; only the
+// Add button was ever built.
+function EditVendor({ vendor, onClose }) {
+    const update = useUpdateVendor();
+    const [form, setForm] = useState(null);
+
+    useEffect(() => {
+        if (!vendor) return setForm(null);
+        setForm({
+            name: vendor.name || '',
+            phone: vendor.phone || '',
+            gstin: vendor.gstin || '',
+            address: vendor.address || '',
+        });
+    }, [vendor]);
+
+    if (!vendor || !form) return null;
+
+    const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+    const save = async () => {
+        const body = { id: vendor._id };
+        for (const key of ['name', 'phone', 'gstin', 'address']) {
+            if (form[key].trim() !== (vendor[key] || '')) body[key] = form[key].trim();
+        }
+        if (Object.keys(body).length === 1) return onClose();
+        await update.mutateAsync(body);
+        onClose();
+    };
+
+    return (
+        <Modal open onClose={onClose} title={`Edit ${vendor.name}`}
+               footer={<>
+                   <Button onClick={onClose}>Cancel</Button>
+                   <Button variant="primary" loading={update.isPending}
+                           disabled={form.name.trim().length < 2} onClick={save}>Save</Button>
+               </>}>
+            <div className="flex flex-col gap-3">
+                <Field label="Vendor name" required><Input value={form.name} autoFocus onChange={set('name')} /></Field>
+                <Field label="Phone"><Input inputMode="numeric" maxLength={10} value={form.phone} onChange={set('phone')} /></Field>
+                <Field label="GSTIN" hint="Optional">
+                    <Input value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value.toUpperCase() })} />
+                </Field>
+                <Field label="Address"><Input value={form.address} onChange={set('address')} /></Field>
+
+                <div className="bg-paper-2 border border-line rounded-md px-3 py-2.5 text-[12.5px] text-ink-2">
+                    Purchased, paid and outstanding are not editable — they move through bills and
+                    payments only. {money(vendor.outstanding)} is outstanding right now.
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 function Vendors() {
     const vendors = useVendors();
     const ageing = useAgeing();
     const [adding, setAdding] = useState(false);
+    const [editing, setEditing] = useState(null);
     const [paying, setPaying] = useState(null);
 
     return (
@@ -380,9 +538,14 @@ function Vendors() {
                                     <Td align="right">{num(v.totalPaid)}</Td>
                                     <Td align="right" className={v.outstanding > 0 ? 'text-crit font-semibold' : ''}>{num(v.outstanding)}</Td>
                                     <Td>
-                                        <Can perm="vendor.pay">
-                                            {v.outstanding > 0 && <Button size="sm" variant="primary" onClick={() => setPaying(v)}>Pay</Button>}
-                                        </Can>
+                                        <span className="inline-flex gap-1.5">
+                                            <Can perm="vendor.manage">
+                                                <Button size="sm" onClick={() => setEditing(v)}>Edit</Button>
+                                            </Can>
+                                            <Can perm="vendor.pay">
+                                                {v.outstanding > 0 && <Button size="sm" variant="primary" onClick={() => setPaying(v)}>Pay</Button>}
+                                            </Can>
+                                        </span>
                                     </Td>
                                 </Tr>
                             ))}
@@ -421,6 +584,7 @@ function Vendors() {
             </Card>
 
             <AddVendor open={adding} onClose={() => setAdding(false)} />
+            <EditVendor vendor={editing} onClose={() => setEditing(null)} />
             {paying && <PayModal vendor={paying} onClose={() => setPaying(null)} />}
         </>
     );
@@ -431,6 +595,7 @@ function Statement() {
     const vendors = useVendors();
     const [id, setId] = useState('');
     const st = useVendorStatement(id);
+    const payments = useVendorPayments(id);
 
     return (
         <>
@@ -465,6 +630,32 @@ function Statement() {
                         </Card>
                     )}
                 </Async>
+            )}
+
+            {/* The statement interleaves bills and payments into a running balance.
+                This is the plain payment list, which is what somebody actually needs
+                when they are matching a UTR or a cheque number against the bank. */}
+            {id && (
+                <Card title="Payments made" hint="newest first">
+                    <Async query={payments} rows={3}>
+                        {(list) => (
+                            <Table head={['Date', { label: 'Amount', align: 'right' }, 'Mode', 'Reference', 'Against bills']}
+                                   isEmpty={!list.length} empty="Nothing has been paid to this vendor yet" minWidth={560}>
+                                {list.map((p) => (
+                                    <Tr key={p._id}>
+                                        <Td className="font-mono text-[11.5px] text-ink-3 whitespace-nowrap">{date(p.date)}</Td>
+                                        <Td align="right" className="font-semibold text-good">{money(p.amount)}</Td>
+                                        <Td className="font-mono text-[11.5px] text-ink-3">{p.mode}</Td>
+                                        <Td className="font-mono text-[11.5px]">{p.refNo || '—'}</Td>
+                                        <Td className="text-[12.5px]">
+                                            {(p.allocations || []).map((a) => `${a.billNo} (${money(a.amount)})`).join(', ') || '—'}
+                                        </Td>
+                                    </Tr>
+                                ))}
+                            </Table>
+                        )}
+                    </Async>
+                </Card>
             )}
         </>
     );

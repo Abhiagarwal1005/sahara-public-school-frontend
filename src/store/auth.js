@@ -22,6 +22,16 @@ export const useAuth = create((set, get) => ({
         return permissions.has(key);
     },
 
+    // This account can open everything and change nothing (the Watcher role).
+    //
+    // The server sends it as a flag on the user, so no screen carries a
+    // hardcoded role name — the same reason every gate asks for a capability
+    // rather than a role. Almost nothing needs to consult it: a read-only role
+    // holds no write permission, so every <Can perm="..."> around a write button
+    // already hides on its own. It is here for the handful of places where a
+    // single permission covers both looking and doing.
+    isReadOnly: () => Boolean(get().user?.readOnly),
+
     applySession: ({ user, permissions, accessToken, features }) => {
         if (accessToken) setAccessToken(accessToken);
         set({

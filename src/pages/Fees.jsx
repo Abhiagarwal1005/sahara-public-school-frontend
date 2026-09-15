@@ -11,11 +11,19 @@ import {
     Async, PageTitle, Tabs, Pill, statusPill, EmptyState, Loading, Pagination, cx,
 } from '../components/ui';
 import { Can } from '../components/Can';
+import { ReceiptPrint, fromCollection, fromStockCollection } from '../components/Receipt';
 import { useAuth } from '../store/auth';
 
 // ---------------------------------------------------------------------------
 // Collect panel — StudentProfile uses this in a modal too, hence the
 // export. One collection UI across the whole app.
+//
+// A parent settling two months, or the whole year, in one go is ordinary — and
+// the months they are paying for have not been raised yet, so there is nothing
+// on this screen for the money to land on. Whatever no month claims is held as
+// advance and settles each new month as it is raised, so this panel has to say
+// that out loud BEFORE the money is taken: "₹9,000 will be held" is a very
+// different sentence from "₹9,000 collected", and the parent is standing there.
 // ---------------------------------------------------------------------------
 export function CollectFeePanel({ studentId, onDone }) {
     const pending = usePendingFees(studentId);
@@ -29,9 +37,18 @@ export function CollectFeePanel({ studentId, onDone }) {
 
     if (pending.isPending) return <Loading rows={3} />;
 
-    const demands = pending.data || [];
+    const demands = pending.data?.demands || [];
+    const held = pending.data?.credit || 0;
+    const room = pending.data?.advanceRoom || { months: 0, amount: 0 };
+
     const totalDue = demands.reduce((s, d) => s + Math.max(0, d.amount - d.discount - d.paidAmount), 0);
+    // The most that can be taken today: everything open, plus the headroom left
+    // before this student would be holding more than a session's fee in
+    // advance. The server enforces the same ceiling — this only stops the
+    // button being offered and then refused.
+    const ceiling = totalDue + room.amount;
     const value = Number(String(amount).replace(/,/g, '')) || 0;
+    const advance = Math.max(0, value - totalDue);
 
     if (receipt) {
         return (
@@ -42,51 +59,53 @@ export function CollectFeePanel({ studentId, onDone }) {
                     Receipt <b className="font-mono">{receipt.receiptNo}</b> · {receipt.mode}
                 </p>
                 <p className="text-[12.5px] text-ink-2 mt-2">
-                    {receipt.covered.map((c) => monthLabel(c.month)).join(', ')} covered.
-                    {receipt.balanceAfter > 0 && <> {money(receipt.balanceAfter)} still outstanding.</>}
+                    {receipt.covered.length > 0 && <>{receipt.covered.map((c) => monthLabel(c.month)).join(', ')} covered. </>}
+                    {receipt.balanceAfter > 0 && <>{money(receipt.balanceAfter)} still outstanding.</>}
                 </p>
+                {/* The one line the parent will ask about later. Said on the
+                    screen and printed on the slip. */}
+                {receipt.advance > 0 && (
+                    <p className="text-[12.5px] text-brand mt-1.5">
+                        <b>{money(receipt.advance)} held in advance</b>
+                        {/* Same distinction the preview draws — with every month of
+                            the session already raised there is nothing left for it
+                            to settle, and saying otherwise here would be the last
+                            thing the office reads before the parent walks away. */}
+                        {room.months > 0
+                            ? ' — it settles each month as it is raised.'
+                            : ' — every month of this session is already billed, so it stays on the student.'}
+                    </p>
+                )}
                 <div className="flex gap-2 justify-center mt-4">
                     <Button onClick={() => window.print()}>Print receipt</Button>
                     <Button variant="primary" onClick={() => { setReceipt(null); onDone?.(); }}>Done</Button>
                 </div>
 
-                {/* Print layout — hidden on screen, full on paper */}
-                <div className="print-only text-left">
-                    <div className="text-center pb-3 mb-3 border-b-2 border-ink">
-                        <b className="block text-lg font-bold">Sahara Public School</b>
-                        <span className="text-xs text-ink-3">
-                            Fee Receipt{session.data?.name ? ` · Session ${session.data.name}` : ''}
-                        </span>
-                    </div>
-                    {[['Receipt no.', receipt.receiptNo], ['Student', receipt.student.name],
-                      ['Admission no.', receipt.student.admissionNo], ['Class', receipt.student.className],
-                      ['Mode', receipt.mode]].map(([k, v]) => (
-                        <div key={k} className="flex justify-between py-1 text-[13px]"><span className="text-ink-2">{k}</span><b>{v}</b></div>
-                    ))}
-                    <div className="border-t border-line my-2" />
-                    {receipt.covered.map((c) => (
-                        <div key={c.month} className="flex justify-between py-1 text-[13px]">
-                            <span className="text-ink-2">{monthLabel(c.month)} fee</span><b>{money(c.amount)}</b>
-                        </div>
-                    ))}
-                    <div className="flex justify-between border-t border-line mt-2 pt-2 text-[15px]">
-                        <span>Total received</span><b className="text-good">{money(receipt.amount)}</b>
-                    </div>
-                    <div className="flex justify-between mt-8 text-[11px] text-ink-3">
-                        <span>Received by: Accounts</span><span>Authorised signature</span>
-                    </div>
-                </div>
+                {/* One print block for every receipt in the app — see Receipt.jsx.
+                    It also signs the receipt with the name of whoever took the
+                    money, instead of the literal word "Accounts". */}
+                <ReceiptPrint receipt={fromCollection(receipt)} heading="Fee Receipt" />
             </div>
         );
     }
 
-    if (!demands.length) return <EmptyState>This student has no fees outstanding</EmptyState>;
+    // Nothing open AND nothing left to bill. This is the only case where there
+    // is genuinely nothing to do — a student with no dues but months still to
+    // come can still pay ahead, and used to be turned away here.
+    if (!demands.length && room.amount <= 0) {
+        return (
+            <EmptyState>
+                This student has no fees outstanding and nothing further to be billed this session
+                {held > 0 ? ` — ${money(held)} is being held for them` : ''}
+            </EmptyState>
+        );
+    }
 
     return (
         <div className="grid gap-4 lg:grid-cols-2">
             <div>
                 <Table head={['Month', { label: 'Due', align: 'right' }, 'Status']} minWidth={300}
-                       isEmpty={false}>
+                       isEmpty={!demands.length} empty="Every month raised so far is paid">
                     {demands.map((d) => {
                         const due = Math.max(0, d.amount - d.discount - d.paidAmount);
                         return (
@@ -103,12 +122,30 @@ export function CollectFeePanel({ studentId, onDone }) {
             <div className="flex flex-col gap-3">
                 <div className="flex items-baseline justify-between pb-3 border-b border-line">
                     <span className="text-[12px] text-ink-3">Total outstanding</span>
-                    <span className="text-[22px] font-semibold tnum text-crit">{money(totalDue)}</span>
+                    <span className={cx('text-[22px] font-semibold tnum', totalDue > 0 ? 'text-crit' : 'text-good')}>
+                        {money(totalDue)}
+                    </span>
                 </div>
 
-                <Field label="Amount" hint="Oldest months are settled first">
+                {/* Money already sitting on this child. Without it the counter
+                    would happily take a second advance on top of the first. */}
+                {held > 0 && (
+                    <div className="flex items-baseline justify-between text-[12.5px] -mt-1">
+                        <span className="text-ink-3">Already held in advance</span>
+                        <b className="tnum text-brand">{money(held)}</b>
+                    </div>
+                )}
+
+                <Field
+                    label="Amount"
+                    hint={
+                        room.amount > 0
+                            ? `Oldest months first. Up to ${money(ceiling)} — anything past the ${money(totalDue)} owed is held in advance`
+                            : 'Oldest months are settled first'
+                    }
+                >
                     <Input inputMode="numeric" value={amount} autoFocus
-                           placeholder={String(totalDue)}
+                           placeholder={String(totalDue || ceiling)}
                            onChange={(e) => setAmount(e.target.value)} />
                 </Field>
 
@@ -124,7 +161,7 @@ export function CollectFeePanel({ studentId, onDone }) {
                     </div>
                 </Field>
 
-                {value > 0 && value <= totalDue && (
+                {value > 0 && value <= ceiling && (
                     <div className="bg-paper-2 border border-line rounded-md px-3 py-2.5 text-[12.5px] text-ink-2">
                         {(() => {
                             let left = value;
@@ -136,18 +173,48 @@ export function CollectFeePanel({ studentId, onDone }) {
                                 if (take > 0) covered.push(`${monthLabel(d.month)} (${money(take)})`);
                                 left -= take;
                             }
-                            return <>This settles <b className="text-ink">{covered.join(', ')}</b>. {money(totalDue - value)} will remain outstanding.</>;
+                            return (
+                                <>
+                                    {covered.length > 0 && (
+                                        <>This settles <b className="text-ink">{covered.join(', ')}</b>. </>
+                                    )}
+                                    {totalDue - value > 0 && <>{money(totalDue - value)} will remain outstanding.</>}
+                                    {/* When every month of the session has already been
+                                        raised there is nothing left for an advance to land
+                                        on. Saying "settles the coming months" there would be
+                                        a promise the session cannot keep. */}
+                                    {advance > 0 && (
+                                        <>
+                                            <b className="text-brand">{money(advance)}</b> will be held in advance
+                                            {room.months > 0 ? (
+                                                <> and settle the {room.months} month{room.months === 1 ? '' : 's'} still
+                                                to be billed this session.</>
+                                            ) : (
+                                                <> — every month of this session is already billed, so it stays on the
+                                                student until there is a month to settle.</>
+                                            )}
+                                        </>
+                                    )}
+                                </>
+                            );
                         })()}
                     </div>
                 )}
 
-                {value > totalDue && (
-                    <p className="text-[12.5px] text-crit">Only {money(totalDue)} is outstanding — you cannot collect more than that.</p>
+                {value > ceiling && (
+                    <p className="text-[12.5px] text-crit">
+                        {room.ceiling > 0
+                            ? <>That would hold {money(advance)} in advance, past the {money(totalDue)} owed. The most
+                               anyone can hold is {money(room.ceiling)} — one session&rsquo;s fee
+                               {room.amount < room.ceiling && <>, and {money(room.ceiling - room.amount)} of that is already held</>}.
+                               Check the amount.</>
+                            : <>This student has no monthly fee set, so nothing can be held in advance for them.</>}
+                    </p>
                 )}
 
                 <Button
                     variant="primary" className="justify-center" loading={collect.isPending}
-                    disabled={!(value > 0) || value > totalDue}
+                    disabled={!(value > 0) || value > ceiling}
                     onClick={() => collect.mutate({ studentId, amount: value, mode })}
                 >
                     Collect &amp; receipt
@@ -195,33 +262,7 @@ export function CollectStockDuesPanel({ studentId, onDone }) {
                     <Button variant="primary" onClick={() => { setReceipt(null); onDone?.(); }}>Done</Button>
                 </div>
 
-                {/* Print layout — hidden on screen, full on paper */}
-                <div className="print-only text-left">
-                    <div className="text-center pb-3 mb-3 border-b-2 border-ink">
-                        <b className="block text-lg font-bold">Sahara Public School</b>
-                        <span className="text-xs text-ink-3">
-                            Uniform &amp; Books Receipt
-                            {session.data?.name ? ` · Session ${session.data.name}` : ''}
-                        </span>
-                    </div>
-                    {[['Receipt no.', receipt.receiptNo], ['Student', receipt.student.name],
-                      ['Admission no.', receipt.student.admissionNo], ['Class', receipt.student.className],
-                      ['Mode', receipt.mode]].map(([k, v]) => (
-                        <div key={k} className="flex justify-between py-1 text-[13px]"><span className="text-ink-2">{k}</span><b>{v}</b></div>
-                    ))}
-                    <div className="border-t border-line my-2" />
-                    {receipt.covered.map((c) => (
-                        <div key={c.billNo} className="flex justify-between py-1 text-[13px]">
-                            <span className="text-ink-2">Bill {c.billNo}</span><b>{money(c.amount)}</b>
-                        </div>
-                    ))}
-                    <div className="flex justify-between border-t border-line mt-2 pt-2 text-[15px]">
-                        <span>Total received</span><b className="text-good">{money(receipt.amount)}</b>
-                    </div>
-                    <div className="flex justify-between mt-8 text-[11px] text-ink-3">
-                        <span>Received by: Accounts</span><span>Authorised signature</span>
-                    </div>
-                </div>
+                <ReceiptPrint receipt={fromStockCollection(receipt)} heading="Uniform &amp; Books Receipt" />
             </div>
         );
     }
@@ -337,7 +378,7 @@ function StudentPicker({ onPick, picked }) {
                     <Table head={['Name', 'Class', { label: 'Outstanding', align: 'right' }, '']}
                            isEmpty={!d.items.length} empty="No students found" minWidth={420}>
                         {d.items.map((s) => {
-                            const due = (s.feeOutstanding || 0) + (s.stockOutstanding || 0);
+                            const due = (s.feeOutstanding || 0) + (s.stockOutstanding || 0) + (s.chargeOutstanding || 0);
                             return (
                                 <Tr key={s._id}>
                                     <Td className="font-semibold whitespace-nowrap">{s.name}</Td>
@@ -530,9 +571,10 @@ function Defaulters() {
                     {(d) => (
                         <>
                         <Table
-                            head={['Student', 'Class', 'Guardian phone', { label: 'Fee due', align: 'right' },
-                                   { label: 'Stock due', align: 'right' }, { label: 'Total', align: 'right' }]}
-                            isEmpty={!d.items.length} empty="Nothing outstanding — all clear" minWidth={640}
+                            head={['Student', 'Class', 'Phone', { label: 'Fee due', align: 'right' },
+                                   { label: 'Stock due', align: 'right' }, { label: 'Other fees', align: 'right' },
+                                   { label: 'Total', align: 'right' }]}
+                            isEmpty={!d.items.length} empty="Nothing outstanding — all clear" minWidth={720}
                         >
                             {d.items.map((s) => (
                                 <Tr key={s._id}>
@@ -543,8 +585,9 @@ function Defaulters() {
                                     <Td className="font-mono text-[12px]">{s.phone}</Td>
                                     <Td align="right">{money(s.feeOutstanding)}</Td>
                                     <Td align="right">{money(s.stockOutstanding)}</Td>
+                                    <Td align="right">{money(s.chargeOutstanding || 0)}</Td>
                                     <Td align="right" className="text-crit font-semibold">
-                                        {money(s.feeOutstanding + s.stockOutstanding)}
+                                        {money(s.feeOutstanding + s.stockOutstanding + (s.chargeOutstanding || 0))}
                                     </Td>
                                 </Tr>
                             ))}
@@ -608,33 +651,40 @@ function ClassReport({ month }) {
 
 export default function Fees() {
     const session = useActiveSession();
-    const [tab, setTab] = useState('collect');
+    const [tab, setTab] = useState(null);
     const [month, setMonth] = useState(currentMonthKey());
     const [picked, setPicked] = useState(null);
     const can = useAuth((s) => s.can);
 
     const months = monthOptions(session.data?.feeMonths?.length ? session.data.feeMonths : [currentMonthKey()]);
 
+    // Every tab asks for the capability it actually uses. Collect was shown to
+    // anyone holding `fee.view`, so a viewer could work all the way through
+    // picking a student and typing an amount before the server refused it.
     const tabs = [
-        { value: 'collect', label: 'Collect fee' },
+        ...(can('fee.collect') ? [{ value: 'collect', label: 'Collect fee' }] : []),
         { value: 'month', label: 'Month view' },
         { value: 'defaulters', label: 'Defaulters' },
         ...(can('report.fee') ? [{ value: 'report', label: 'Class-wise report' }] : []),
     ];
 
+    // Never trust the stored tab on its own — it can name one this user cannot
+    // open. Fall back to the first tab they actually have.
+    const active = tabs.some((t) => t.value === tab) ? tab : tabs[0]?.value;
+
     return (
         <>
             <PageTitle title="Fees" sub={monthLabel(month)}>
-                {tab !== 'collect' && tab !== 'defaulters' && (
+                {active !== 'collect' && active !== 'defaulters' && (
                     <Select className="w-auto" value={month} onChange={(e) => setMonth(e.target.value)}>
                         {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                     </Select>
                 )}
             </PageTitle>
 
-            <Tabs tabs={tabs} value={tab} onChange={(t) => { setTab(t); setPicked(null); }} />
+            <Tabs tabs={tabs} value={active} onChange={(t) => { setTab(t); setPicked(null); }} />
 
-            {tab === 'collect' && (
+            {active === 'collect' && (
                 <>
                     <StudentPicker picked={picked} onPick={setPicked} />
                     {picked && (
@@ -651,9 +701,9 @@ export default function Fees() {
                 </>
             )}
 
-            {tab === 'month' && <MonthView month={month} />}
-            {tab === 'defaulters' && <Defaulters />}
-            {tab === 'report' && <ClassReport month={month} />}
+            {active === 'month' && <MonthView month={month} />}
+            {active === 'defaulters' && <Defaulters />}
+            {active === 'report' && <ClassReport month={month} />}
         </>
     );
 }

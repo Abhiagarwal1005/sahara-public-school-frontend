@@ -8,12 +8,14 @@ import {
 } from '../components/ui';
 import { Can } from '../components/Can';
 import { IdCardPill, IdCardAction } from '../components/IdCard';
+import { TcPill, TcAction } from '../components/TransferCertificate';
 
 function AddStudent({ open, onClose }) {
     const classes = useClasses();
     const create = useCreateStudent();
     const [form, setForm] = useState({
-        name: '', guardianName: '', phone: '', class: '', monthlyFee: '', address: '',
+        name: '', guardianName: '', motherName: '', dob: '', phone: '', altPhone: '',
+        class: '', monthlyFee: '', address: '',
         admissionDate: toInputDate(new Date()),
     });
     const [errors, setErrors] = useState({});
@@ -37,13 +39,17 @@ function AddStudent({ open, onClose }) {
             await create.mutateAsync({
                 name: form.name.trim(),
                 guardianName: form.guardianName || undefined,
+                motherName: form.motherName || undefined,
+                dob: form.dob || undefined,
                 phone: form.phone,
+                altPhone: form.altPhone || undefined,
                 address: form.address || undefined,
                 class: form.class,
                 monthlyFee: form.monthlyFee ? Number(form.monthlyFee) : undefined,
                 admissionDate: form.admissionDate,
             });
-            setForm({ name: '', guardianName: '', phone: '', class: '', monthlyFee: '', address: '',
+            setForm({ name: '', guardianName: '', motherName: '', dob: '', phone: '', altPhone: '',
+                      class: '', monthlyFee: '', address: '',
                       admissionDate: toInputDate(new Date()) });
             setErrors({});
             onClose();
@@ -70,12 +76,34 @@ function AddStudent({ open, onClose }) {
                     <Input value={form.name} autoFocus error={errors.name}
                            onChange={(e) => set({ name: e.target.value })} />
                 </Field>
-                <Field label="Guardian name">
+                {/* Both parents, named separately. An admission form asks for both
+                    and a transfer certificate prints both — folding the mother into
+                    "guardian" means the school does not have her name when it is
+                    asked for. `guardianName` keeps its name in the database because
+                    the guardian is not always a parent. */}
+                <Field label="Father / guardian name">
                     <Input value={form.guardianName} onChange={(e) => set({ guardianName: e.target.value })} />
                 </Field>
-                <Field label="Guardian phone" required error={errors.phone}>
+                <Field label="Mother's name">
+                    <Input value={form.motherName} onChange={(e) => set({ motherName: e.target.value })} />
+                </Field>
+                {/* Not required, because the office often does not have the
+                    certificate on admission day and refusing over it would be
+                    absurd. But a transfer certificate prints it, and a TC
+                    without a date of birth is the one the receiving school
+                    hands straight back — so it is asked for now, not chased
+                    on the day the child leaves. */}
+                <Field label="Date of birth" hint="Printed on the transfer certificate">
+                    <Input type="date" value={form.dob} onChange={(e) => set({ dob: e.target.value })} />
+                </Field>
+                <Field label="Phone" required error={errors.phone} hint="The number the office rings first">
                     <Input inputMode="numeric" maxLength={10} value={form.phone} error={errors.phone}
                            onChange={(e) => set({ phone: e.target.value.replace(/\D/g, '') })} />
+                </Field>
+                <Field label="Alternate phone" error={errors.altPhone}
+                       hint="Optional — the other parent, or a neighbour">
+                    <Input inputMode="numeric" maxLength={10} value={form.altPhone} error={errors.altPhone}
+                           onChange={(e) => set({ altPhone: e.target.value.replace(/\D/g, '') })} />
                 </Field>
                 <Field label="Class" required error={errors.class}>
                     <Select value={form.class} error={errors.class}
@@ -231,6 +259,15 @@ export default function Students() {
                     <option value="pending">ID card: not taken</option>
                     <option value="issued">ID card: taken</option>
                 </Select>
+                {/* With Status = Left this IS the office's TC working list —
+                    who has gone and has not been given their certificate. Both
+                    filters are indexed equalities, so the list and its count
+                    come off one index with no aggregation. */}
+                <Select className="w-auto" value={filters.tc || ''} onChange={(e) => set({ tc: e.target.value || undefined })}>
+                    <option value="">TC: all</option>
+                    <option value="pending">TC: not issued</option>
+                    <option value="given">TC: issued</option>
+                </Select>
             </Toolbar>
 
             <Card>
@@ -238,7 +275,7 @@ export default function Students() {
                     {(data) => (
                         <>
                             <Table
-                                head={['Adm. no', { label: 'Name', primary: true }, 'Class', 'Guardian phone',
+                                head={['Adm. no', { label: 'Name', primary: true }, 'Class', 'Phone',
                                        { label: 'Monthly fee', align: 'right' }, { label: 'Outstanding', align: 'right' },
                                        'Status', 'ID card', '']}
                                 isEmpty={!data.items.length}
@@ -246,7 +283,7 @@ export default function Students() {
                                 minWidth={920}
                             >
                                 {data.items.map((s) => {
-                                    const due = (s.feeOutstanding || 0) + (s.stockOutstanding || 0);
+                                    const due = (s.feeOutstanding || 0) + (s.stockOutstanding || 0) + (s.chargeOutstanding || 0);
                                     return (
                                         <Tr key={s._id}>
                                             <Td className="font-mono text-[11.5px] text-ink-3">{s.admissionNo}</Td>
@@ -259,7 +296,31 @@ export default function Students() {
                                             <Td className="font-mono text-[11.5px] text-ink-3">{s.phone}</Td>
                                             <Td align="right">{money(s.monthlyFee)}</Td>
                                             <Td align="right" className={due > 0 ? 'text-crit font-semibold' : ''}>{money(due)}</Td>
-                                            <Td>{due === 0 ? <Pill tone="ok">Clear</Pill> : statusPill(s.status)}</Td>
+                                            {/* The student's STATUS, always. This used to show a green
+                                                "Clear" whenever the dues were zero — so filtering the
+                                                roster to Left listed people the column then labelled
+                                                Clear, and the one thing the column was there to say
+                                                was the one thing it hid. Dues have their own column
+                                                immediately to the left. */}
+                                            {/* Once a student has LEFT, "what is their
+                                                status" and "have they been given their
+                                                TC" are the same question — so the
+                                                certificate lives in this cell rather than
+                                                costing the roster a tenth column that
+                                                would be blank on every active student. */}
+                                            <Td>
+                                                {s.status === 'Left' ? (
+                                                    <span className="inline-flex flex-col items-start gap-1.5">
+                                                        <span className="inline-flex items-center gap-1.5">
+                                                            {statusPill(s.status)}
+                                                            <TcPill tc={s.tc} status={s.status} />
+                                                        </span>
+                                                        <TcAction student={s} />
+                                                    </span>
+                                                ) : (
+                                                    statusPill(s.status)
+                                                )}
+                                            </Td>
                                             <Td>
                                                 <span className="inline-flex items-center gap-2">
                                                     <IdCardPill idCard={s.idCard} />

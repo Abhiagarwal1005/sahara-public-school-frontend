@@ -14,7 +14,7 @@ import { useAuth } from '../store/auth';
 // there was no route, so the trail existed and no one could see it. This is
 // the other half.
 //
-// Every mutation in the app writes here — 51 actions across every module — and
+// Every mutation in the app writes here — 56 actions across every module — and
 // an edit carries the before and after of the fields that actually moved. A
 // save that changed nothing writes no row, which is what keeps this screen
 // worth opening.
@@ -36,7 +36,8 @@ const MODULES = [
     'student', 'teacher', 'fee', 'sale', 'stock', 'purchase', 'vendor',
     'expense', 'salary', 'lead', 'class', 'session', 'attendance', 'user', 'permission',
     // payment.verify / payment.unverify — who signed collected money off, and
-    // who took a tick back off again.
+    // who took a tick back off again — plus payment.edit, the counter
+    // correcting a mode or a reference before it was signed off.
     'payment',
 ];
 

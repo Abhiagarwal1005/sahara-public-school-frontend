@@ -62,6 +62,44 @@ export const useUpdateSession = () =>
         success: 'Session updated',
     });
 
+// ---------------------------------------------------------------------------
+// Session rollover — the new year.
+//
+// The plan is read-only and is what the screen shows BEFORE anything moves.
+// The two mutations invalidate almost everything, because promoting a school
+// changes the roster, the classes, what is owed and what is held — there is
+// very little on any screen that a rollover does not touch.
+// ---------------------------------------------------------------------------
+export const useRolloverPlan = (sessionId) =>
+    useQuery({
+        queryKey: ['rollover', sessionId],
+        queryFn: () => get(`/sessions/${sessionId}/rollover`),
+        enabled: Boolean(sessionId),
+        // A session with nothing before it answers 400. That is an answer, not
+        // a failure worth retrying three times.
+        retry: false,
+    });
+
+export const useRolloverClasses = () =>
+    useAction((id) => post(`/sessions/${id}/rollover/classes`), {
+        invalidate: [['rollover'], ['classes'], ['sessions'], ['audit']],
+        success: (d) => (d.created ? `${d.created} classes copied forward` : d.message),
+    });
+
+export const useRolloverPromote = (onDone) =>
+    useAction(({ id, ...body }) => post(`/sessions/${id}/rollover`, body), {
+        invalidate: [
+            ['rollover'], ['students'], ['student'], ['classes'], ['defaulters'],
+            ['charges'], ['reports'], ['dashboard'], ['sessions'], ['audit'],
+        ],
+        success: (d) =>
+            d.promoted
+                ? `${d.promoted} students promoted to ${d.to}`
+                  + (d.arrears ? ` — ₹${d.arrears.total} of arrears carried` : '')
+                : d.message,
+        onDone,
+    });
+
 export const useActivateSession = () =>
     useAction((id) => post(`/sessions/${id}/activate`), {
         // ['session'] is the active-session query every screen reads; without
@@ -86,8 +124,58 @@ export const useCreateStudent = () =>
 export const useUpdateStudent = () =>
     useAction(({ id, ...body }) => patch(`/students/${id}`, body), { invalidate: [['students'], ['student'], ['classes'], ['audit']], success: 'Student updated' });
 
+// The reason rides along — it is what a transfer certificate prints, and the
+// office knows it on the day and never again.
 export const useMarkLeft = () =>
-    useAction((id) => del(`/students/${id}`), { invalidate: [['students'], ['student'], ['classes'], ['audit']], success: 'Student marked as Left' });
+    useAction(({ id, ...body }) => del(`/students/${id}`, body), {
+        invalidate: [['students'], ['student'], ['classes'], ['defaulters'], ['reports'], ['dashboard'], ['audit']],
+        success: (d) => (d.alreadyLeft ? 'This student had already left' : 'Student marked as Left'),
+    });
+
+// ---- transfer certificates ----
+//
+// Issuing one also takes the student off the roster, so this moves the class
+// counts and every screen that counts money owed — the dues do not leave with
+// the child, they just get harder to collect.
+export const useIssueTC = (onDone) =>
+    useAction(({ id, ...body }) => post(`/students/${id}/tc`, body), {
+        invalidate: [['students'], ['student'], ['classes'], ['defaulters'], ['reports'], ['dashboard'], ['audit']],
+        success: (d) =>
+            `${d.tcNo} issued to ${d.name}`
+            + (d.markedLeft ? ' — also marked as Left' : '')
+            + (d.duesAtIssue > 0 ? ` (over ₹${d.duesAtIssue} outstanding)` : ''),
+        onDone,
+    });
+
+export const useCancelTC = () =>
+    useAction(({ id, reason }) => del(`/students/${id}/tc`, { reason }), {
+        invalidate: [['students'], ['student'], ['classes'], ['defaulters'], ['reports'], ['dashboard'], ['audit']],
+        success: (d) =>
+            `${d.tcNo} cancelled`
+            + (d.restoredToRoster ? ` — ${d.name} is back on the roster` : ''),
+    });
+
+// ---- siblings ----
+//
+// Brothers and sisters share one family group, so linking touches BOTH records
+// — and, when two families merge, everybody already in either of them. Nothing
+// here can know which ids moved, so ['students'] and ['student'] are both
+// invalidated wholesale rather than surgically.
+export const useLinkSibling = (onDone) =>
+    useAction(({ id, siblingId }) => post(`/students/${id}/siblings`, { siblingId }), {
+        invalidate: [['students'], ['student'], ['audit']],
+        success: (d) =>
+            d.merged
+                ? `${d.sibling.name} linked — ${d.members.length} siblings in this family now`
+                : `${d.sibling.name} linked as a sibling`,
+        onDone,
+    });
+
+export const useUnlinkSibling = () =>
+    useAction(({ id, siblingId }) => del(`/students/${id}/siblings/${siblingId}`), {
+        invalidate: [['students'], ['student'], ['audit']],
+        success: (d) => `${d.removed.name} is no longer linked`,
+    });
 
 // ---- ID cards ----
 // Issuing takes money at the counter, so it moves the same caches a fee
@@ -119,10 +207,19 @@ export const usePendingFees = (studentId) =>
 export const useFeeSummary = (month) =>
     useQuery({ queryKey: ['fees', 'summary', month], queryFn: () => get('/fees/summary', { month }), enabled: Boolean(month) });
 
+// `defaulters` is in the list because raising a month can also SETTLE it, out
+// of an advance a parent already paid — so who is behind on fees changes here
+// too, not only who has been billed.
 export const useGenerateFees = () =>
     useAction((body) => post('/fees/generate', body), {
-        invalidate: [['fees'], ['students'], ['dashboard'], ['reports'], ['audit']],
-        success: (d) => (d.created ? `${d.created} fee demands raised (₹${d.totalRaised})` : d.message || 'All fees were already raised'),
+        invalidate: [['fees'], ['students'], ['defaulters'], ['dashboard'], ['reports'], ['audit']],
+        success: (d) =>
+            d.created
+                ? `${d.created} fee demands raised (₹${d.totalRaised})` +
+                  (d.settledFromAdvance
+                      ? ` — ₹${d.settledFromAdvance} of it settled from advance already paid`
+                      : '')
+                : d.message || 'All fees were already raised',
     });
 
 export const useCollectFee = (onDone) =>
@@ -138,9 +235,109 @@ export const useDiscount = () =>
         success: 'Discount applied',
     });
 
+// A receipt, fetched again for reprinting. The route and the permission both
+// existed from the start — there was simply no way to open a receipt after the
+// dialog that issued it had been closed, so a parent asking for a duplicate
+// could not be given one.
+export const useReceipt = (id) =>
+    useQuery({
+        queryKey: ['fees', 'receipt', id],
+        queryFn: () => get(`/fees/receipts/${id}`),
+        enabled: Boolean(id),
+    });
+
+// Handing an advance back — a child leaving mid-session with fee still on
+// their head. Money out, so it invalidates the same screens a collection does.
+export const useRefundCredit = () =>
+    useAction(({ studentId, ...body }) => post(`/fees/credit/${studentId}/refund`, body), {
+        invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['reports'], ['defaulters'], ['audit']],
+        success: (d) => `₹${d.amount} returned to ${d.name}`,
+    });
+
 export const useVoidReceipt = () =>
     useAction(({ id, reason }) => post(`/fees/receipts/${id}/void`, { reason }), {
         invalidate: [['fees'], ['students'], ['student'], ['dashboard'], ['reports'], ['audit']],
+        success: 'Receipt voided',
+    });
+
+// ---- other fees (admission, exams, trips) ----
+//
+// Everything a student is charged beyond the monthly fee. Collecting one moves
+// the same caches a fee collection does — it is the same counter, the same
+// receipt series, the same ledger and the same rollup.
+export const useChargeHeads = ({ includeInactive = false } = {}) =>
+    useQuery({
+        queryKey: ['charges', 'heads', includeInactive],
+        queryFn: () => get('/charges/heads', includeInactive ? { includeInactive: 'true' } : undefined),
+        staleTime: 5 * 60_000,
+    });
+
+export const useCreateChargeHead = () =>
+    useAction((body) => post('/charges/heads', body), {
+        invalidate: [['charges'], ['audit']],
+        success: 'Head created',
+    });
+
+export const useUpdateChargeHead = () =>
+    useAction(({ id, ...body }) => patch(`/charges/heads/${id}`, body), {
+        invalidate: [['charges'], ['audit']],
+        success: 'Head updated',
+    });
+
+export const useCharges = (params) =>
+    useQuery({ queryKey: ['charges', 'list', params], queryFn: () => get('/charges', params), placeholderData: (p) => p });
+
+export const useChargeStudents = (id, params) =>
+    useQuery({
+        queryKey: ['charges', 'students', id, params],
+        queryFn: () => get(`/charges/${id}/students`, params),
+        enabled: Boolean(id),
+        placeholderData: (p) => p,
+    });
+
+export const useRaiseCharge = (onDone) =>
+    useAction((body) => post('/charges', body), {
+        invalidate: [['charges'], ['students'], ['student'], ['defaulters'], ['reports'], ['dashboard'], ['audit']],
+        success: (d) => `${d.charge.headName} raised on ${d.raisedFor} students (₹${d.totalRaised})`,
+        onDone,
+    });
+
+export const useTopUpCharge = () =>
+    useAction((id) => post(`/charges/${id}/top-up`),
+        {
+            invalidate: [['charges'], ['students'], ['student'], ['defaulters'], ['reports'], ['dashboard'], ['audit']],
+            success: (d) => (d.added ? `${d.added} students added` : d.message),
+        });
+
+export const useCancelCharge = () =>
+    useAction(({ id, reason }) => post(`/charges/${id}/cancel`, { reason }), {
+        invalidate: [['charges'], ['students'], ['student'], ['defaulters'], ['reports'], ['dashboard'], ['audit']],
+        success: (d) => `Cancelled — ${d.withdrawn} students no longer charged`,
+    });
+
+export const usePendingCharges = (studentId) =>
+    useQuery({
+        queryKey: ['charges', 'pending', studentId],
+        queryFn: () => get(`/charges/pending/${studentId}`),
+        enabled: Boolean(studentId),
+    });
+
+export const useCollectCharge = (onDone) =>
+    useAction((body) => post('/charges/collect', body), {
+        invalidate: [['charges'], ['students'], ['student'], ['dashboard'], ['reports'], ['defaulters'], ['audit']],
+        success: (d) => `${d.receiptNo} — ₹${d.amount} received`,
+        onDone,
+    });
+
+export const useChargeDiscount = () =>
+    useAction(({ id, ...body }) => post(`/charges/demands/${id}/discount`, body), {
+        invalidate: [['charges'], ['students'], ['student'], ['dashboard'], ['defaulters'], ['audit']],
+        success: 'Discount applied',
+    });
+
+export const useVoidChargeReceipt = () =>
+    useAction(({ id, reason }) => post(`/charges/receipts/${id}/void`, { reason }), {
+        invalidate: [['charges'], ['students'], ['student'], ['dashboard'], ['reports'], ['audit']],
         success: 'Receipt voided',
     });
 
@@ -155,6 +352,16 @@ export const useLeadSummary = () =>
 
 export const useLead = (id) =>
     useQuery({ queryKey: ['leads', 'one', id], queryFn: () => get(`/leads/${id}`), enabled: Boolean(id) });
+
+// "This number rang before." Not a block — a family can enquire about two
+// children — but the desk should see it before typing the whole form again.
+export const useLeadsByPhone = (phone) =>
+    useQuery({
+        queryKey: ['leads', 'by-phone', phone],
+        queryFn: () => get('/leads/by-phone', { phone }),
+        enabled: /^[6-9]\d{9}$/.test(String(phone || '')),
+        staleTime: 60_000,
+    });
 
 export const useCreateLead = (onDone) =>
     useAction((body) => post('/leads', body), {
@@ -230,7 +437,11 @@ export const useCollectStockDues = (onDone) =>
 
 export const useVoidSale = () =>
     useAction(({ id, reason }) => post(`/sales/${id}/void`, { reason }), {
-        invalidate: [['sales'], ['stock'], ['students'], ['dashboard'], ['audit']],
+        // ['reports'] was missing. Voiding a bill writes a REVERSAL, so the
+        // day book, the outstanding report and the cash book all move with it —
+        // they were simply left showing the pre-void figures until something
+        // else happened to refresh them.
+        invalidate: [['sales'], ['stock'], ['students'], ['dashboard'], ['reports'], ['audit']],
         success: 'Bill voided',
     });
 
@@ -246,11 +457,34 @@ export const useAgeing = () => useQuery({ queryKey: ['vendors', 'ageing'], query
 export const useCreateVendor = () =>
     useAction((body) => post('/vendors', body), { invalidate: [['vendors'], ['audit']], success: 'Vendor added' });
 
+export const useUpdateVendor = () =>
+    useAction(({ id, ...body }) => patch(`/vendors/${id}`, body), {
+        invalidate: [['vendors'], ['audit']],
+        success: 'Vendor updated',
+    });
+
+// Every payment made to one vendor. The statement interleaves these with the
+// bills; this is the plain list, for matching a UTR or a cheque number.
+export const useVendorPayments = (id) =>
+    useQuery({
+        queryKey: ['vendors', id, 'payments'],
+        queryFn: () => get(`/vendors/${id}/payments`),
+        enabled: Boolean(id),
+    });
+
 export const usePayVendor = (onDone) =>
     useAction((body) => post('/vendors/pay', body), {
         invalidate: [['vendors'], ['purchases'], ['dashboard'], ['reports'], ['audit']],
         success: 'Payment recorded',
         onDone,
+    });
+
+// Note, photo and date only — the server refuses anything else, because
+// changing a bill's quantities would make the stock movements lie.
+export const useUpdatePurchase = () =>
+    useAction(({ id, ...body }) => patch(`/purchases/${id}`, body), {
+        invalidate: [['purchases'], ['vendors'], ['dashboard'], ['reports'], ['audit']],
+        success: 'Bill updated',
     });
 
 export const usePurchases = (params) =>
@@ -272,6 +506,15 @@ export const useCreateTeacher = () =>
 
 export const useUpdateTeacher = () =>
     useAction(({ id, ...body }) => patch(`/teachers/${id}`, body), { invalidate: [['teachers'], ['audit']], success: 'Teacher updated' });
+
+// Marking somebody Left is what takes them off the attendance sheet and out of
+// next month's salary run. Without it a teacher who resigned stayed on both
+// forever — the route existed, the permission existed, the button did not.
+export const useMarkTeacherLeft = () =>
+    useAction((id) => del(`/teachers/${id}`), {
+        invalidate: [['teachers'], ['attendance'], ['salary'], ['audit']],
+        success: 'Teacher marked as Left',
+    });
 
 export const useTeacherSheet = (date) =>
     useQuery({ queryKey: ['attendance', 'teachers', date], queryFn: () => get('/attendance/teachers', { date }) });
@@ -344,8 +587,14 @@ export const usePaySlip = () =>
 export const useExpenses = (params) =>
     useQuery({ queryKey: ['expenses', params], queryFn: () => get('/expenses', params), placeholderData: (p) => p });
 
-export const useExpenseCategories = () =>
-    useQuery({ queryKey: ['expenses', 'categories'], queryFn: () => get('/expenses/categories'), staleTime: 5 * 60_000 });
+// The expense form's picker wants live heads only. The Categories tab has to
+// see the retired ones too, or retiring one would hide it with no way back.
+export const useExpenseCategories = ({ includeInactive = false } = {}) =>
+    useQuery({
+        queryKey: ['expenses', 'categories', includeInactive],
+        queryFn: () => get('/expenses/categories', includeInactive ? { includeInactive: 'true' } : undefined),
+        staleTime: 5 * 60_000,
+    });
 
 export const useExpenseByCategory = (month) =>
     useQuery({ queryKey: ['expenses', 'by-category', month], queryFn: () => get('/expenses/by-category', { month }), enabled: Boolean(month) });
@@ -357,6 +606,15 @@ export const useCreateExpense = (onDone) =>
         onDone,
     });
 
+// Amount, date and category are frozen by the server; the title, who it was
+// paid to, the note and the photo are not. `expense.edit` has been a switch in
+// Settings from the start with nothing behind it.
+export const useUpdateExpense = () =>
+    useAction(({ id, ...body }) => patch(`/expenses/${id}`, body), {
+        invalidate: [['expenses'], ['audit']],
+        success: 'Expense updated',
+    });
+
 export const useDeleteExpense = () =>
     useAction(({ id, reason }) => del(`/expenses/${id}`, { reason }), {
         invalidate: [['expenses'], ['dashboard'], ['reports'], ['audit']],
@@ -364,11 +622,65 @@ export const useDeleteExpense = () =>
     });
 
 export const useCreateCategory = () =>
-    useAction((body) => post('/expenses/categories', body), { invalidate: [['expenses', 'categories'], ['audit']], success: 'Category created' });
+    useAction((body) => post('/expenses/categories', body), {
+        // ['expenses','categories'] is a PREFIX — it invalidates both the live-only
+        // list the picker reads and the include-inactive one the tab reads.
+        invalidate: [['expenses', 'categories'], ['audit']],
+        success: 'Category created',
+    });
+
+// Rename a head, or retire one. Retiring keeps it off the picker while every
+// expense already filed under it stays exactly where it is — which is why the
+// list has always shown an Active / Inactive pill that nothing could change.
+export const useUpdateCategory = () =>
+    useAction(({ id, ...body }) => patch(`/expenses/categories/${id}`, body), {
+        invalidate: [['expenses'], ['audit']],
+        success: 'Category updated',
+    });
 
 // ---- reports ----
-export const useDashboard = () => useQuery({ queryKey: ['dashboard'], queryFn: () => get('/reports/dashboard') });
-export const useDaybook = (date) => useQuery({ queryKey: ['reports', 'daybook', date], queryFn: () => get('/reports/daybook', { date }) });
+// `period` is today | week | month — the money figures follow it. The
+// outstanding, vendor and advance figures on the same screen do not: those are
+// balances, and a balance has no period.
+export const useDashboard = (period) =>
+    useQuery({
+        queryKey: ['dashboard', period || 'month'],
+        queryFn: () => get('/reports/dashboard', period ? { period } : undefined),
+        // Keep the previous period on screen while the next one loads, so the
+        // tiles do not blank out every time somebody flips the toggle.
+        placeholderData: (p) => p,
+    });
+// A date RANGE. `range` is { from, to } — both optional, and passing nothing
+// asks for today, which is what the dashboard's "Today" card wants.
+export const useDaybook = (range, { enabled = true } = {}) =>
+    useQuery({
+        queryKey: ['reports', 'daybook', range?.from || '', range?.to || ''],
+        queryFn: () => get('/reports/daybook', range),
+        enabled,
+        // Keep the previous range on screen while the new one loads, so moving
+        // the dates does not blank the table on every keystroke.
+        placeholderData: (p) => p,
+    });
+// ---------------------------------------------------------------------------
+// The cash book — what the school actually has in hand, mode by mode.
+//
+// `session` is optional: left out, the active one. Reads a dozen rollup
+// documents, so it is cheap enough to keep fresh rather than cached hard —
+// but it moves on every collection, expense and vendor payment, so every one
+// of those invalidates ['cashbook'].
+// ---------------------------------------------------------------------------
+export const useCashbook = (session) =>
+    useQuery({
+        // Deliberately keyed UNDER 'reports'. Every rupee that moves already
+        // invalidates ['reports'], and TanStack matches by prefix — so the cash
+        // book refreshes with them instead of needing its own key added to
+        // twenty-odd mutation lists, one of which somebody would eventually
+        // forget. A stale balance is the one thing this screen must never show.
+        queryKey: ['reports', 'cashbook', session || 'active'],
+        queryFn: () => get('/reports/cashbook', session ? { session } : undefined),
+        placeholderData: (p) => p,
+    });
+
 export const useOutstanding = () => useQuery({ queryKey: ['reports', 'outstanding'], queryFn: () => get('/reports/outstanding') });
 export const useIncomeExpense = () => useQuery({ queryKey: ['reports', 'income'], queryFn: () => get('/reports/income-expense') });
 export const useFeeTrend = () => useQuery({ queryKey: ['reports', 'trend'], queryFn: () => get('/reports/fee-trend') });
@@ -398,6 +710,29 @@ export const useVerifyPayment = () => useVerifyAction('verify', 'Payment verifie
 
 export const useUnverifyPayment = () =>
     useVerifyAction('unverify', 'Verification removed', 'It was already unverified');
+
+// Correcting what the counter wrote down, while the entry is still unchecked —
+// the amount, the mode, the reference. See payment.service.js.
+//
+// This invalidates everything a COLLECTION would, and deliberately so. Unlike
+// the tick, a corrected amount moves the months a receipt paid, the student's
+// balance, the charge or the bill behind it, and the month's rollup — so the
+// dues list, the defaulters, the dashboard and the day book are all capable of
+// being wrong after it. Listing only the screens a mode change touches would be
+// right until the first time somebody corrected a figure.
+export const useUpdatePayment = () =>
+    useAction(({ id, ...body }) => patch(`/payments/${id}`, body), {
+        invalidate: [
+            ['payments'], ['fees'], ['charges'], ['sales'], ['stock'], ['idcards'],
+            ['students'], ['student'], ['defaulters'], ['dashboard'], ['reports'], ['audit'],
+        ],
+        success: (d) =>
+            d?.amountChanged
+                ? `Corrected to ₹${d.payment?.amount}`
+                : d?.changed
+                  ? 'Payment corrected'
+                  : 'Nothing was different',
+    });
 
 // ---- edit history ----
 // Who changed what. The backend gates this on `audit.view`, which only Admin

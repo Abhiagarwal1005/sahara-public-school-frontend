@@ -600,7 +600,9 @@ function NewSale({ preselect, onDone }) {
                     </Field>
                     <Field label="Mode">
                         <div className="flex border border-line-2 rounded-md overflow-hidden w-max">
-                            {['Cash', 'UPI', 'Bank'].map((m) => (
+                            {/* Cheque belongs here too. Every other money screen offers
+                                all four, and the day book reconciles all four. */}
+                            {['Cash', 'UPI', 'Bank', 'Cheque'].map((m) => (
                                 <button key={m} type="button" onClick={() => setMode(m)}
                                         className={cx('px-3 py-1.5 text-[12.5px] border-r border-line-2 last:border-r-0',
                                                       mode === m ? 'bg-brand text-white font-semibold' : 'bg-paper-2 text-ink-2 hover:bg-white')}>
@@ -666,10 +668,11 @@ function Register() {
                                     <Td align="right">{money(s.paidAmount)}</Td>
                                     <Td align="right" className={s.dueAmount > 0 ? 'text-warn font-semibold' : ''}>{money(s.dueAmount)}</Td>
                                     <Td>
-                                        {/* A bill that has since taken money is refused by the server
-                                            (409) — the receipt would be stranded. The button still
-                                            shows, so the message explains why rather than the option
-                                            silently not being there. */}
+                                        {/* A bill that has since taken money, or whose own receipt
+                                            has been verified, is refused by the server (409). The
+                                            button still shows, so the message explains why rather
+                                            than the option silently not being there — the register
+                                            does not carry either flag to decide it here. */}
                                         <Can perm="stock.adjust">
                                             <Button size="sm" variant="danger" onClick={() => setVoiding(s)}>Void</Button>
                                         </Can>
@@ -694,7 +697,8 @@ function Register() {
                 consequence={
                     'The stock goes back in, the credit portion comes off the student, and the cash '
                     + 'portion is reversed in the day book. If money has already been received against '
-                    + 'this bill it cannot be voided — settle that receipt first.'
+                    + 'this bill it cannot be voided — settle that receipt first. Nor can it be voided '
+                    + 'once its payment has been verified: take the verification off first.'
                 }
                 confirmLabel="Void bill"
                 onConfirm={async (reason) => {
