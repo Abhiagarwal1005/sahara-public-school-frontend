@@ -204,6 +204,8 @@ export default function Students() {
     const [adding, setAdding] = useState(false);
     const classes = useClasses();
     const students = useStudents(filters);
+    // undefined until the first page lands, so the header does not flash a 0.
+    const total = students.data?.pagination?.totalItems;
     // Read, never hardcoded — the roster belongs to whichever session is active.
     const session = useActiveSession();
 
@@ -211,7 +213,23 @@ export default function Students() {
 
     return (
         <>
-            <PageTitle title="Students" sub={session.data?.name ? `Session ${session.data.name}` : ''}>
+            {/* The count sits BESIDE the heading, and it is the one the FILTERS
+                are showing rather than the school's total — it comes from the
+                same paginated response the table is built from, so
+                "Pre Nursery – A · Active" reads 12, not 547. That is what
+                somebody looking at a filtered list wants to know, and the
+                filters right below say what it is counting. */}
+            <PageTitle
+                title={
+                    <span className="inline-flex items-baseline gap-2">
+                        Students
+                        {total !== undefined && (
+                            <span className="text-[13px] font-semibold tnum text-ink-3">{num(total)}</span>
+                        )}
+                    </span>
+                }
+                sub={session.data?.name ? `Session ${session.data.name}` : ''}
+            >
                 <Can perm="student.create">
                     <Button variant="primary" onClick={() => setAdding(true)}>+ Add student</Button>
                 </Can>
