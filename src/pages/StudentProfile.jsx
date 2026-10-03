@@ -317,6 +317,7 @@ export default function StudentProfile() {
     // day — but it is what the transfer certificate prints, and asking later
     // means asking nobody.
     const [leavingReason, setLeavingReason] = useState('');
+    const [clearOutstanding, setClearOutstanding] = useState(false);
     const [editing, setEditing] = useState(false);
     const [collecting, setCollecting] = useState(false);
     const [collectingDues, setCollectingDues] = useState(false);
@@ -667,8 +668,13 @@ export default function StudentProfile() {
                                 <Button onClick={() => setLeaving(false)}>Cancel</Button>
                                 <Button variant="danger" loading={markLeft.isPending}
                                         onClick={async () => {
-                                            await markLeft.mutateAsync({ id, reason: leavingReason.trim() || undefined });
+                                            await markLeft.mutateAsync({
+                                                id,
+                                                reason: leavingReason.trim() || undefined,
+                                                clearOutstanding: clearOutstanding || undefined,
+                                            });
                                             setLeavingReason('');
+                                            setClearOutstanding(false);
                                             setLeaving(false);
                                             // Deliberately STAYS on the profile rather than
                                             // returning to the roster. The next thing the
@@ -710,10 +716,15 @@ export default function StudentProfile() {
                             </p>
                         )}
                         {summary.totalOutstanding > 0 && (
-                            <p className="mt-3 text-[12.5px] text-warn bg-warn-bg border border-warn rounded-md px-3 py-2">
-                                {money(summary.totalOutstanding)} is still outstanding — it will keep showing on the outstanding report
-                                — leaving the school does not clear dues.
-                            </p>
+                            <div className="mt-3 text-[12.5px] text-warn bg-warn-bg border border-warn rounded-md px-3 py-2">
+                                <p>{money(summary.totalOutstanding)} is still outstanding.</p>
+                                <label className="flex items-start gap-2 mt-2 cursor-pointer">
+                                    <input type="checkbox" className="mt-0.5 w-4 h-4 accent-brand shrink-0"
+                                           checked={clearOutstanding}
+                                           onChange={(e) => setClearOutstanding(e.target.checked)} />
+                                    <span className="text-ink-2">Clear all outstanding dues — waives everything this student still owes</span>
+                                </label>
+                            </div>
                         )}
                     </Modal>
 
